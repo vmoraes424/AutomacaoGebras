@@ -17,11 +17,12 @@ CLICKSIGN_ACCESS_TOKEN = "e8963e51-df88-4455-b19b-5a33098e7a5b"
 CLICKSIGN_BASE_URL = "https://app.clicksign.com/api/v3"
 
 # Lista sequencial (A ordem da lista define a ordem de envio)
-SIGN_SEQUENCE = [
-    {"name": "Vinicius Moraes", "email": "vmoraes424@gmail.com"},  # Grupo 1
-    {"name": "Z Cansado Ninja", "email": "zcansadoninja@gmail.com"},  # Grupo 2
-    {"name": "HGs Pop", "email": "hgspop@gmail.com"},  # Grupo 3
-]
+# SIGN_SEQUENCE = [
+#     {"name": "Vinicius Moraes", "email": "vmoraes424@gmail.com"},  # Grupo 1
+#     {"name": "Z Cansado Ninja", "email": "zcansadoninja@gmail.com"},  # Grupo 2
+#     {"name": "HGs Pop", "email": "hgspop@gmail.com"},  # Grupo 3
+# ]
+SIGN_SEQUENCE = [{"name": "Vinicius Moraes", "email": "vmoraes424@gmail.com"}]
 
 FINAL_NOTIFY_EMAIL = "vmoraes424@gmail.com"
 
@@ -263,6 +264,7 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str):
 
 
 # ---------- GERAÇÃO DO CONTRATO (MANTIDA) ----------
+# ---------- GERAÇÃO DO CONTRATO ----------
 def fill_contract(deal_data):
     if not os.path.exists(MODELO_DOCX):
         print(f"[!] Erro: Modelo '{MODELO_DOCX}' não encontrado.")
@@ -285,6 +287,19 @@ def fill_contract(deal_data):
     p2 = get_val("41a3157128d51e2fc803eeec4b242efafcb55b4e")
     qtd_sole = get_val("f9923cdce1274da8c10cec1b9ab561e024504620")
 
+    # Tratamento para não forçar a data de hoje caso os campos de pagamento venham vazios (Opcional)
+    raw_dt_implantacao = get_val("2b8f62a107891e26390459cfa4048b3eedade11b")
+    dt_implantacao = (
+        formatar_data_ptbr(raw_dt_implantacao) if raw_dt_implantacao else "A definir"
+    )
+
+    raw_dt_primeira_cobranca = get_val("f5f69ea52e5f65b37c9672fdb4dcfb3b6a4cdbb2")
+    dt_primeira_cobranca = (
+        formatar_data_ptbr(raw_dt_primeira_cobranca)
+        if raw_dt_primeira_cobranca
+        else "A definir"
+    )
+
     contexto = {
         "numero_contrato": f"CGRc{p1}i{p2}n1r0a26",
         "nome_cliente": get_val("28d491e0263008b437e28fc55bbad8302c4646c8"),
@@ -302,6 +317,14 @@ def fill_contract(deal_data):
         "data_inicio": formatar_data_ptbr(
             deal_data.get("won_time") or deal_data.get("add_time")
         ),
+        # --- NOVOS CAMPOS ADICIONADOS ---
+        "indicadores_qualidade": get_val("ffb2d5aec9acdee5a242ca19683bbf4caa24cd53"),
+        "qualidade_energia": get_val("c0a23912d889e00f51ed5bd08a55856a7e5dc930"),
+        "data_pagamento_implantacao": dt_implantacao,
+        "data_pagamento_primeira_cobranca": dt_primeira_cobranca,
+        "contato_gestor": get_val("ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"),
+        "contato_financeiro": get_val("722da69afe31c1f8fa4f5457a223e2a952ae0978"),
+        "contato_contratante": get_val("3002b2df87f0577585ebaec394fd09a38ca8778f"),
     }
 
     clean_title = str(deal_data.get("title", "SemTitulo")).replace("/", "-")
