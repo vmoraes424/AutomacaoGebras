@@ -1,30 +1,37 @@
 import time
-import json
 import os
 import requests
 import base64
-from datetime import datetime
-from selenium import webdriver
+from datetime import datetime, timezone
 from docxtpl import DocxTemplate
 
 # --- CONFIGURAÇÕES ---
 API_TOKEN = "469c97918264d07279f03fe60378daaf8eff2b6a"
-XPATH_BOTAO_GANHO = "//button[@data-testid='won-button']"
 MODELO_DOCX = "contrato_padrao.docx"
 PASTA_SAIDA = "./contratos"
 
-CLICKSIGN_ACCESS_TOKEN = "e8963e51-df88-4455-b19b-5a33098e7a5b"
+CLICKSIGN_ACCESS_TOKEN = "541dc480-3b74-4dc6-99f7-b0b44de5ad67"
 CLICKSIGN_BASE_URL = "https://app.clicksign.com/api/v3"
 
-# Lista sequencial (A ordem da lista define a ordem de envio)
-# SIGN_SEQUENCE = [
-#     {"name": "Vinicius Moraes", "email": "vmoraes424@gmail.com"},  # Grupo 1
-#     {"name": "Z Cansado Ninja", "email": "zcansadoninja@gmail.com"},  # Grupo 2
-#     {"name": "HGs Pop", "email": "hgspop@gmail.com"},  # Grupo 3
-# ]
-SIGN_SEQUENCE = [{"name": "Vinicius Moraes", "email": "vmoraes424@gmail.com"}]
+# Configurações do Polling
+INTERVALO_POLLING_SEGUNDOS = 30  # Verifica a cada 1 minuto
+ARQUIVO_DEALS_PROCESSADOS = "deals_processados.txt"
 
-FINAL_NOTIFY_EMAIL = "vmoraes424@gmail.com"
+# Define a data/hora de início do script em UTC para comparar com o won_time do Pipedrive
+DATA_INICIO_SCRIPT = datetime.now(timezone.utc)
+
+
+# ---------- GERENCIAMENTO DE ESTADO ----------
+def carregar_deals_processados():
+    if not os.path.exists(ARQUIVO_DEALS_PROCESSADOS):
+        return set()
+    with open(ARQUIVO_DEALS_PROCESSADOS, "r") as f:
+        return set(line.strip() for line in f if line.strip())
+
+
+def salvar_deal_processado(deal_id):
+    with open(ARQUIVO_DEALS_PROCESSADOS, "a") as f:
+        f.write(f"{deal_id}\n")
 
 
 # ---------- FUNÇÕES AUXILIARES ----------
@@ -73,12 +80,27 @@ def numero_por_extenso_unidades(num):
     return f"{n} ({texto}) {'unidade' if n==1 else 'unidades'}"
 
 
-def get_deal_data(deal_id):
-    url = f"https://api.pipedrive.com/api/v2/deals/{deal_id}"
-    headers = {"x-api-token": API_TOKEN}
-    print(f"[*] Consultando API para Deal ID: {deal_id}...")
-    r = requests.get(url, headers=headers)
-    return r.json().get("data") if r.status_code == 200 else None
+# ---------- EXTRAÇÃO DINÂMICA DE SIGNATÁRIOS ----------
+def extrair_signatarios(deal_data):
+    """
+    Extrai os signatários dos custom_fields do Pipedrive na ordem exata necessária.
+    """
+    cf = deal_data.get("custom_fields", {})
+
+    ordem_chaves = [
+        ("Coordenador Principal", "92359b129485b08fd024b8c28ef022e7635419a3"),
+        ("Contato Principal", "a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6"),
+        ("Gestor Gebras", "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"),
+        ("Diretor Principal", "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2"),
+    ]
+
+    sign_sequence = []
+    for nome_cargo, chave in ordem_chaves:
+        email = cf.get(chave)
+        if email and str(email).strip() != "":
+            sign_sequence.append({"name": nome_cargo, "email": str(email).strip()})
+
+    return sign_sequence
 
 
 # ---------- CLICKSIGN CLIENT (V3) ----------
@@ -123,9 +145,7 @@ class ClicksignClient:
         print("[*] Upload documento (V3)...")
         with open(file_path, "rb") as f:
             raw = base64.b64encode(f.read()).decode()
-
         header = "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,"
-
         payload = {
             "data": {
                 "type": "documents",
@@ -141,7 +161,6 @@ class ClicksignClient:
         self._raise(r, "upload_document")
         return r.json()["data"]["id"]
 
-    # [ALTERAÇÃO 1] Adicionado parâmetro 'group'
     def create_signer(self, envelope_id, name, email, group_number):
         payload = {
             "data": {
@@ -149,7 +168,7 @@ class ClicksignClient:
                 "attributes": {
                     "name": name,
                     "email": email,
-                    "group": group_number,  # Define a ordem sequencial (1, 2, 3...)
+                    "group": group_number,
                     "communicate_events": {
                         "signature_request": "email",
                         "signature_reminder": "email",
@@ -207,7 +226,6 @@ class ClicksignClient:
         r = self.session.patch(self._url(f"/envelopes/{envelope_id}"), json=payload)
         self._raise(r, "activate_envelope")
 
-    # Notificação manual (só para o primeiro da fila, para garantir o start)
     def notify_signer_manual(self, envelope_id, signer_id):
         payload = {
             "data": {
@@ -222,7 +240,7 @@ class ClicksignClient:
 
 
 # ---------- FLUXO RÁPIDO (FIRE & FORGET COM GRUPOS) ----------
-def clicksign_fire_and_forget(doc_path: str, envelope_name: str):
+def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: list):
     cs = ClicksignClient(CLICKSIGN_BASE_URL, CLICKSIGN_ACCESS_TOKEN)
 
     print(f"[*] 1. Criando envelope '{envelope_name}'...")
@@ -231,13 +249,13 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str):
     print("[*] 2. Upload do documento...")
     document_id = cs.upload_document_base64(envelope_id, doc_path)
 
-    print("[*] 3. Configurando signatários (Sequencial por Grupos)...")
+    print(
+        f"[*] 3. Configurando {len(sign_sequence)} signatários (Sequencial por Grupos)..."
+    )
     first_signer_id = None
 
-    # [ALTERAÇÃO 2] Loop usando enumerate para gerar grupos sequenciais (1, 2, 3...)
-    for i, person in enumerate(SIGN_SEQUENCE):
-        group_num = i + 1  # Vinicius = 1, Z Cansado = 2, HGs = 3
-
+    for i, person in enumerate(sign_sequence):
+        group_num = i + 1
         signer_id = cs.create_signer(
             envelope_id, person["name"], person["email"], group_num
         )
@@ -246,24 +264,21 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str):
 
         if i == 0:
             first_signer_id = signer_id
-        print(f"    > {person['name']} adicionado ao Grupo {group_num}.")
+        print(
+            f"    > {person['name']} ({person['email']}) adicionado ao Grupo {group_num}."
+        )
 
     print("[*] 4. Ativando envelope...")
     cs.activate_envelope(envelope_id)
 
-    # IMPORTANTE: No modelo de grupos, ao ativar o envelope, a Clicksign
-    # deve enviar automaticamente para o Grupo 1.
-    # Mas como estamos usando API, as vezes é bom dar o 'peteleco' inicial.
     if first_signer_id:
         print("[*] Disparando notificação para o Grupo 1...")
         cs.notify_signer_manual(envelope_id, first_signer_id)
 
     print(f"[v] Envelope {envelope_id} ativado! Fluxo sequencial automático iniciado.")
-    # Agora a Clicksign gerencia: Quando G1 assinar, ela notifica G2 automaticamente.
     return envelope_id
 
 
-# ---------- GERAÇÃO DO CONTRATO (MANTIDA) ----------
 # ---------- GERAÇÃO DO CONTRATO ----------
 def fill_contract(deal_data):
     if not os.path.exists(MODELO_DOCX):
@@ -287,7 +302,6 @@ def fill_contract(deal_data):
     p2 = get_val("41a3157128d51e2fc803eeec4b242efafcb55b4e")
     qtd_sole = get_val("f9923cdce1274da8c10cec1b9ab561e024504620")
 
-    # Tratamento para não forçar a data de hoje caso os campos de pagamento venham vazios (Opcional)
     raw_dt_implantacao = get_val("2b8f62a107891e26390459cfa4048b3eedade11b")
     dt_implantacao = (
         formatar_data_ptbr(raw_dt_implantacao) if raw_dt_implantacao else "A definir"
@@ -317,7 +331,6 @@ def fill_contract(deal_data):
         "data_inicio": formatar_data_ptbr(
             deal_data.get("won_time") or deal_data.get("add_time")
         ),
-        # --- NOVOS CAMPOS ADICIONADOS ---
         "indicadores_qualidade": get_val("ffb2d5aec9acdee5a242ca19683bbf4caa24cd53"),
         "qualidade_energia": get_val("c0a23912d889e00f51ed5bd08a55856a7e5dc930"),
         "data_pagamento_implantacao": dt_implantacao,
@@ -335,113 +348,104 @@ def fill_contract(deal_data):
     return nome_saida
 
 
-# ---------- EXECUÇÃO PRINCIPAL ----------
-# ---------- EXECUÇÃO PRINCIPAL (OTIMIZADA PARA MÚLTIPLOS DEALS) ----------
+# ---------- NOVO FLUXO: POLLING DA API ----------
+def buscar_deals_ganhos():
+    """Faz a requisição para a API do Pipedrive buscando os deals ganhos."""
+    url = "https://api.pipedrive.com/api/v2/deals"
+    params = {"status": "won"}
+    headers = {"x-api-token": API_TOKEN}
+
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        if response.status_code == 200:
+            return response.json().get("data", [])
+        else:
+            print(f"[!] Erro ao buscar deals: {response.status_code} - {response.text}")
+            return []
+    except Exception as e:
+        print(f"[!] Falha na conexão com Pipedrive: {e}")
+        return []
+
+
+def processar_deals_pendentes():
+    """Função principal executada a cada ciclo do loop."""
+    deals = buscar_deals_ganhos()
+    if not deals:
+        return
+
+    deals_processados = carregar_deals_processados()
+
+    for deal in deals:
+        deal_id = str(deal.get("id"))
+        won_time_str = deal.get("won_time")
+
+        if not won_time_str or deal_id in deals_processados:
+            continue
+
+        try:
+            won_time_dt = datetime.strptime(won_time_str, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            print(f"[!] Formato de data desconhecido no deal {deal_id}: {won_time_str}")
+            continue
+
+        if won_time_dt < DATA_INICIO_SCRIPT:
+            continue
+
+        print(
+            f"\n[!] NOVO DEAL GANHO DETECTADO! Deal ID: {deal_id} | Título: {deal.get('title')}"
+        )
+
+        try:
+            print(f"    -> Gerando contrato...")
+            doc_path = fill_contract(deal)
+
+            sequence_dinamica = extrair_signatarios(deal)
+
+            if doc_path:
+                if len(sequence_dinamica) > 0:
+                    print(f"    -> Enviando para Clicksign...")
+                    envelope_name = f"Contrato Deal {deal_id} - {deal.get('title')}"
+
+                    clicksign_fire_and_forget(
+                        doc_path, envelope_name, sequence_dinamica
+                    )
+
+                    salvar_deal_processado(deal_id)
+                    print(
+                        f"[v] Sucesso! Contrato enviado. Deal ID {deal_id} salvo no log."
+                    )
+                else:
+                    print(
+                        "[!] Nenhum e-mail de signatário encontrado no Deal. Contrato não enviado para assinatura."
+                    )
+                    # Se não foi enviado porque falta email, podes decidir se salvas ou não no log.
+                    # Se não salvares, ele vai tentar enviar de novo no próximo polling (útil se o user preencher o email depois).
+
+        except Exception as e:
+            print(f"[!] Erro ao processar Deal {deal_id}: {e}")
+
+
 def main():
     if not os.path.exists(PASTA_SAIDA):
         os.makedirs(PASTA_SAIDA)
 
-    options = webdriver.ChromeOptions()
-    options.add_argument("--log-level=3")
-    driver = webdriver.Chrome(options=options)
-
-    print("--- AUTOMACAO V2 (PIPEDRIVE -> CLICKSIGN FIRE & FORGET) ---")
-    print("[i] Aguardando login e navegação para um Deal...")
-    driver.get("https://gebras.pipedrive.com/")
-
-    # JS de monitoramento (O mesmo de antes)
-    inject_js = f"""
-    let btn = document.evaluate("{XPATH_BOTAO_GANHO}", document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-    if (btn) {{
-        if (!btn.hasAttribute('data-listener-attached')) {{
-            btn.addEventListener('click', function() {{ window.buttonClicked = true; }});
-            btn.setAttribute('data-listener-attached', 'true');
-            return true;
-        }}
-    }}
-    return false;
-    """
-
-    last_url = ""
-    listener_attached = False
+    print("--- INICIANDO AUTOMACAO V3 (POLLING PIPEDRIVE -> CLICKSIGN) ---")
+    print(
+        f"[*] Script iniciado em: {DATA_INICIO_SCRIPT.strftime('%d/%m/%Y %H:%M:%S')} UTC"
+    )
+    print(f"[*] Apenas deals ganhos após este momento serão processados.")
+    print(
+        f"[*] Verificando Pipedrive a cada {INTERVALO_POLLING_SEGUNDOS} segundos...\n"
+    )
 
     try:
         while True:
-            current_url = driver.current_url
-
-            # [CORREÇÃO CRÍTICA]: Se mudou de página (foi pra outro Deal), reseta o monitoramento
-            if current_url != last_url:
-                listener_attached = False
-                last_url = current_url
-                # Se saiu de um deal, reseta a flag de clique pra garantir
-                try:
-                    driver.execute_script("window.buttonClicked = false;")
-                except:
-                    pass
-
-            # Se estamos em uma página de Deal e ainda não "grudamos" no botão dessa página específica
-            if "/deal/" in current_url and not listener_attached:
-                try:
-                    attached = driver.execute_script(inject_js)
-                    if attached:
-                        print(
-                            f"[*] Monitorando botão neste Deal ({current_url.split('/deal/')[1].split('?')[0]})..."
-                        )
-                        listener_attached = True
-                except:
-                    # Botão pode não ter carregado ainda, tenta no próximo loop
-                    pass
-
-            # Se já estamos monitorando, verifica se houve clique
-            if listener_attached:
-                try:
-                    clicked = driver.execute_script("return window.buttonClicked;")
-                    if clicked:
-                        print("\n[!] GANHO DETECTADO! Iniciando automação...")
-
-                        # Reseta o clique imediatamente para não disparar 2x
-                        driver.execute_script("window.buttonClicked = false;")
-
-                        # Extrai ID
-                        deal_id = (
-                            current_url.split("/deal/")[1].split("?")[0].split("/")[0]
-                        )
-
-                        # --- BLOCO DE EXECUÇÃO ---
-                        try:
-                            print(f"    -> Processando Deal {deal_id}...")
-                            data = get_deal_data(deal_id)
-
-                            if data:
-                                doc_path = fill_contract(data)
-                                if doc_path:
-                                    # Envia para Clicksign e libera
-                                    clicksign_fire_and_forget(
-                                        doc_path, f"Contrato Deal {deal_id}"
-                                    )
-                                    print(
-                                        f"[v] Sucesso! Pode ir para o próximo Deal.\n"
-                                    )
-
-                        except Exception as e:
-                            print(f"[!] Erro ao processar Deal {deal_id}: {e}")
-                            print(
-                                "[!] O script continua rodando. Tente novamente ou vá para o próximo."
-                            )
-
-                        # Pequena pausa para garantir que a UI do Pipedrive estabilize
-                        time.sleep(1)
-
-                except Exception as e:
-                    # Se der erro ao checar o clique (ex: página mudou no meio), reseta
-                    listener_attached = False
-
-            time.sleep(1)
-
+            processar_deals_pendentes()
+            time.sleep(INTERVALO_POLLING_SEGUNDOS)
     except KeyboardInterrupt:
-        print("\nFim da automação.")
-    finally:
-        driver.quit()
+        print("\n[!] Automação encerrada pelo usuário.")
 
 
 if __name__ == "__main__":

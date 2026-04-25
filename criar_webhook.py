@@ -1,7 +1,7 @@
 import requests
 
 # CONFIG
-ACCESS_TOKEN = "e8963e51-df88-4455-b19b-5a33098e7a5b"
+ACCESS_TOKEN = "541dc480-3b74-4dc6-99f7-b0b44de5ad67"
 BASE_URL = "https://app.clicksign.com/api/v3"
 
 # URL DO SEU SERVIDOR (Use webhook.site para testar se não tiver server ainda)
