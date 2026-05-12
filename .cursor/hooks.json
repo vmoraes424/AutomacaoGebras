@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python .cursor/hooks/entendimento_hooks.py session_start",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python .cursor/hooks/entendimento_hooks.py post_tool_use",
+        "matcher": "Write",
+        "timeout": 10
+      }
+    ]
+  }
+}
