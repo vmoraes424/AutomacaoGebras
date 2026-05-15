@@ -1,0 +1,5 @@
+https://www-gebras.plune.com.br/JSON/Parceiro.tbParceiro/Browse?&Parceiro.tbParceiro.Ativo=1&_Parceiro.tbParceiro.BrowseSequence=ParceiroId,EmProspeccao,NumeroContribuinte,NomRazaoSocial,UFPrincipalId,CidadePrincipalId,ContatoNome,ContatoTelefone&_Parceiro.tbParceiro.BrowseLimit=30&_Parceiro.tbParceiro.Order=%22Parceiro%22.%22tbParceiro%22.%22NomRazaoSocial%22&__debug__=0
+
+
+
+https://www-gebras.plune.com.br/JSON/Parceiro.tbParceiro/Browse?&Parceiro.tbParceiro.Ativo=1&Parceiro.tbParceiro.NumeroContribuinte=35969644072&_Parceiro.tbParceiro.BrowseSequence=ParceiroId,EmProspeccao,NumeroContribuinte,NomRazaoSocial,UFPrincipalId,CidadePrincipalId,ContatoNome,ContatoTelefone&_Parceiro.tbParceiro.BrowseLimit=30&_Parceiro.tbParceiro.Order=%22Parceiro%22.%22tbParceiro%22.%22NomRazaoSocial%22&__debug__=0

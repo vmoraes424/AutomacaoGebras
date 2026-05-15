@@ -1,0 +1,24 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.pytest_cache/
+
+# Runtime output
+contratos/
+runtime/state/*.txt
+runtime/state/*.json
+deals_processados.txt
+envelopes_pendentes.json
+pedidos_plune_criados.txt
+
+# Temp/lock artifacts
+_classcgi_out.html
+.~lock*.docx#
+*.tmp
+*.temp
+
+# Cursor hook caches
+.cursor/hooks/__pycache__/

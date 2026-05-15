@@ -5,17 +5,44 @@ import base64
 from datetime import datetime, timezone
 from docxtpl import DocxTemplate
 
-# --- CONFIGURAÇÕES ---
-API_TOKEN = "469c97918264d07279f03fe60378daaf8eff2b6a"
-MODELO_DOCX = "contrato_padrao.docx"
-PASTA_SAIDA = "./contratos"
+from .config import (
+    ARQUIVO_DEALS_PROCESSADOS,
+    CLICKSIGN_ACCESS_TOKEN,
+    CLICKSIGN_BASE_URL,
+    CLICKSIGN_RATE_LIMIT_BUFFER_SEC,
+    CLICKSIGN_RATE_LIMIT_MAX_RETRIES,
+    INTERVALO_POLLING_SEGUNDOS,
+    MODELO_DOCX,
+    PASTA_SAIDA,
+    PIPEDRIVE_API_TOKEN,
+    TESTE_PLUNE_SEM_ASSINATURA,
+)
+from .envelope_state import listar_aguardando_pedido_plune, salvar_envelope_pendente
+from .plune_pedido import PluneError, buscar_parceiro_plune_por_documento, criar_pedido_plune
+from .pipedrive_fields import (
+    FIELD_CONTATO_CONTRATANTE,
+    FIELD_CONTATO_FINANCEIRO,
+    FIELD_CONTATO_GESTOR,
+    FIELD_DATA_IMPLANTACAO,
+    FIELD_DATA_PRIMEIRA_COBRANCA,
+    FIELD_DOCUMENTO,
+    FIELD_ENDERECO,
+    FIELD_CIDADE,
+    FIELD_INDICADORES_QUALIDADE,
+    FIELD_NOME_CLIENTE,
+    FIELD_NUMERO_CONTRATO_P1,
+    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_QTD_SOLE,
+    FIELD_QUALIDADE_ENERGIA,
+    FIELD_VALOR_IMPLANTACAO,
+    FIELD_VALOR_MENSAL,
+    extrair_signatarios,
+    formatar_data_ptbr,
+    get_val,
+)
 
-CLICKSIGN_ACCESS_TOKEN = "541dc480-3b74-4dc6-99f7-b0b44de5ad67"
-CLICKSIGN_BASE_URL = "https://app.clicksign.com/api/v3"
-
-# Configurações do Polling
-INTERVALO_POLLING_SEGUNDOS = 30  # Verifica a cada 1 minuto
-ARQUIVO_DEALS_PROCESSADOS = "deals_processados.txt"
+# --- CONFIGURAÇÕES (ver config.py) ---
+API_TOKEN = PIPEDRIVE_API_TOKEN
 
 # Define a data/hora de início do script em UTC para comparar com o won_time do Pipedrive
 DATA_INICIO_SCRIPT = datetime.now(timezone.utc)
@@ -30,6 +57,9 @@ def carregar_deals_processados():
 
 
 def salvar_deal_processado(deal_id):
+    pasta_estado = os.path.dirname(ARQUIVO_DEALS_PROCESSADOS)
+    if pasta_estado:
+        os.makedirs(pasta_estado, exist_ok=True)
     with open(ARQUIVO_DEALS_PROCESSADOS, "a") as f:
         f.write(f"{deal_id}\n")
 
@@ -41,17 +71,6 @@ def formatar_moeda(valor):
         return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except (ValueError, TypeError):
         return str(valor)
-
-
-def formatar_data_ptbr(data_iso):
-    if not data_iso:
-        return datetime.now().strftime("%d/%m/%Y")
-    try:
-        data_str = str(data_iso).split("T")[0]
-        data_obj = datetime.strptime(data_str, "%Y-%m-%d")
-        return data_obj.strftime("%d/%m/%Y")
-    except ValueError:
-        return str(data_iso)
 
 
 def numero_por_extenso_unidades(num):
@@ -80,29 +99,6 @@ def numero_por_extenso_unidades(num):
     return f"{n} ({texto}) {'unidade' if n==1 else 'unidades'}"
 
 
-# ---------- EXTRAÇÃO DINÂMICA DE SIGNATÁRIOS ----------
-def extrair_signatarios(deal_data):
-    """
-    Extrai os signatários dos custom_fields do Pipedrive na ordem exata necessária.
-    """
-    cf = deal_data.get("custom_fields", {})
-
-    ordem_chaves = [
-        ("Coordenador Principal", "92359b129485b08fd024b8c28ef022e7635419a3"),
-        ("Contato Principal", "a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6"),
-        ("Gestor Gebras", "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"),
-        ("Diretor Principal", "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2"),
-    ]
-
-    sign_sequence = []
-    for nome_cargo, chave in ordem_chaves:
-        email = cf.get(chave)
-        if email and str(email).strip() != "":
-            sign_sequence.append({"name": nome_cargo, "email": str(email).strip()})
-
-    return sign_sequence
-
-
 # ---------- CLICKSIGN CLIENT (V3) ----------
 class ClicksignClient:
     def __init__(self, base_url: str, access_token: str):
@@ -117,11 +113,52 @@ class ClicksignClient:
         sep = "&" if "?" in path else "?"
         return f"{self.base_url}{path}{sep}access_token={self.access_token}"
 
+    def _seconds_until_rate_reset(self, response: requests.Response) -> float | None:
+        reset_raw = response.headers.get("X-Rate-Limit-Reset")
+        if reset_raw:
+            try:
+                wait = int(reset_raw) - time.time() + CLICKSIGN_RATE_LIMIT_BUFFER_SEC
+                return max(wait, 0.5)
+            except ValueError:
+                pass
+        retry_after = response.headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(float(retry_after) + CLICKSIGN_RATE_LIMIT_BUFFER_SEC, 0.5)
+            except ValueError:
+                pass
+        return None
+
+    def _request(self, method: str, path: str, ctx: str, **kwargs) -> requests.Response:
+        url = self._url(path)
+        response = None
+        for attempt in range(1, CLICKSIGN_RATE_LIMIT_MAX_RETRIES + 1):
+            response = self.session.request(method, url, **kwargs)
+            if response.status_code != 429:
+                return response
+
+            wait = self._seconds_until_rate_reset(response)
+            if wait is None:
+                wait = min(2**attempt, 30)
+            remaining = response.headers.get("X-Rate-Limit-Remaining", "?")
+            reset_at = response.headers.get("X-Rate-Limit-Reset", "?")
+            print(
+                f"[!] Clicksign rate limit em {ctx} "
+                f"(tentativa {attempt}/{CLICKSIGN_RATE_LIMIT_MAX_RETRIES}, "
+                f"remaining={remaining}, reset={reset_at}). "
+                f"Aguardando {wait:.1f}s..."
+            )
+            time.sleep(wait)
+
+        assert response is not None
+        self._raise(response, ctx)
+        return response
+
     def _raise(self, r, ctx):
         if not r.ok:
             try:
                 body = r.json()
-            except:
+            except Exception:
                 body = r.text
             raise RuntimeError(f"[Clicksign] {ctx} -> {r.status_code}: {body}")
 
@@ -137,7 +174,7 @@ class ClicksignClient:
                 },
             }
         }
-        r = self.session.post(self._url("/envelopes"), json=payload)
+        r = self._request("POST", "/envelopes", "create_envelope", json=payload)
         self._raise(r, "create_envelope")
         return r.json()["data"]["id"]
 
@@ -155,8 +192,11 @@ class ClicksignClient:
                 },
             }
         }
-        r = self.session.post(
-            self._url(f"/envelopes/{envelope_id}/documents"), json=payload
+        r = self._request(
+            "POST",
+            f"/envelopes/{envelope_id}/documents",
+            "upload_document",
+            json=payload,
         )
         self._raise(r, "upload_document")
         return r.json()["data"]["id"]
@@ -177,8 +217,11 @@ class ClicksignClient:
                 },
             }
         }
-        r = self.session.post(
-            self._url(f"/envelopes/{envelope_id}/signers"), json=payload
+        r = self._request(
+            "POST",
+            f"/envelopes/{envelope_id}/signers",
+            "create_signer",
+            json=payload,
         )
         self._raise(r, "create_signer")
         return r.json()["data"]["id"]
@@ -194,8 +237,11 @@ class ClicksignClient:
                 },
             }
         }
-        r = self.session.post(
-            self._url(f"/envelopes/{envelope_id}/requirements"), json=payload
+        r = self._request(
+            "POST",
+            f"/envelopes/{envelope_id}/requirements",
+            "create_sign_requirement",
+            json=payload,
         )
         self._raise(r, "create_sign_requirement")
 
@@ -210,8 +256,11 @@ class ClicksignClient:
                 },
             }
         }
-        r = self.session.post(
-            self._url(f"/envelopes/{envelope_id}/requirements"), json=payload
+        r = self._request(
+            "POST",
+            f"/envelopes/{envelope_id}/requirements",
+            "create_auth_requirement",
+            json=payload,
         )
         self._raise(r, "create_auth_requirement")
 
@@ -223,7 +272,9 @@ class ClicksignClient:
                 "attributes": {"status": "running"},
             }
         }
-        r = self.session.patch(self._url(f"/envelopes/{envelope_id}"), json=payload)
+        r = self._request(
+            "PATCH", f"/envelopes/{envelope_id}", "activate_envelope", json=payload
+        )
         self._raise(r, "activate_envelope")
 
     def notify_signer_manual(self, envelope_id, signer_id):
@@ -233,10 +284,21 @@ class ClicksignClient:
                 "attributes": {"message": "Sua vez de assinar o contrato."},
             }
         }
-        self.session.post(
-            self._url(f"/envelopes/{envelope_id}/signers/{signer_id}/notifications"),
+        r = self._request(
+            "POST",
+            f"/envelopes/{envelope_id}/signers/{signer_id}/notifications",
+            "notify_signer",
             json=payload,
         )
+        self._raise(r, "notify_signer")
+
+    def get_envelope_status(self, envelope_id: str) -> str | None:
+        r = self._request(
+            "GET", f"/envelopes/{envelope_id}", "get_envelope_status"
+        )
+        if not r.ok:
+            return None
+        return r.json().get("data", {}).get("attributes", {}).get("status")
 
 
 # ---------- FLUXO RÁPIDO (FIRE & FORGET COM GRUPOS) ----------
@@ -290,54 +352,64 @@ def fill_contract(deal_data):
         print(f"[!] Erro ao abrir docx: {e}")
         return None
 
-    cf = deal_data.get("custom_fields", {})
+    p1 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
+    p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2)
+    qtd_sole = get_val(deal_data, FIELD_QTD_SOLE)
 
-    def get_val(code):
-        v = cf.get(code)
-        if isinstance(v, dict):
-            return str(v.get("value", ""))
-        return str(v) if v is not None else ""
-
-    p1 = get_val("14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b")
-    p2 = get_val("41a3157128d51e2fc803eeec4b242efafcb55b4e")
-    qtd_sole = get_val("f9923cdce1274da8c10cec1b9ab561e024504620")
-
-    raw_dt_implantacao = get_val("2b8f62a107891e26390459cfa4048b3eedade11b")
+    raw_dt_implantacao = get_val(deal_data, FIELD_DATA_IMPLANTACAO)
     dt_implantacao = (
         formatar_data_ptbr(raw_dt_implantacao) if raw_dt_implantacao else "A definir"
     )
 
-    raw_dt_primeira_cobranca = get_val("f5f69ea52e5f65b37c9672fdb4dcfb3b6a4cdbb2")
+    raw_dt_primeira_cobranca = get_val(deal_data, FIELD_DATA_PRIMEIRA_COBRANCA)
     dt_primeira_cobranca = (
         formatar_data_ptbr(raw_dt_primeira_cobranca)
         if raw_dt_primeira_cobranca
         else "A definir"
     )
 
+    documento_pipe = get_val(deal_data, FIELD_DOCUMENTO)
+    nome_pipe = get_val(deal_data, FIELD_NOME_CLIENTE)
+    parceiro_plune = None
+    try:
+        parceiro_plune = buscar_parceiro_plune_por_documento(documento_pipe, nome_pipe)
+    except PluneError as e:
+        print(f"[!] Aviso: busca Plune por CNPJ falhou ({e}); usando dados do Pipedrive no contrato.")
+
+    if parceiro_plune:
+        nome_cliente = parceiro_plune.get("razao_social") or nome_pipe
+        endereco = parceiro_plune.get("endereco") or get_val(deal_data, FIELD_ENDERECO)
+        cidade = parceiro_plune.get("cidade") or get_val(deal_data, FIELD_CIDADE)
+        documento = parceiro_plune.get("documento_formatado") or documento_pipe
+        print(f"[*] Contrato com dados do Plune: {nome_cliente} ({documento})")
+    else:
+        nome_cliente = nome_pipe
+        endereco = get_val(deal_data, FIELD_ENDERECO)
+        cidade = get_val(deal_data, FIELD_CIDADE)
+        documento = documento_pipe
+
     contexto = {
         "numero_contrato": f"CGRc{p1}i{p2}n1r0a26",
-        "nome_cliente": get_val("28d491e0263008b437e28fc55bbad8302c4646c8"),
-        "endereco": get_val("81566ac6e038bb0ba3adfa122c798b3e497b7538"),
-        "cidade": get_val("2bf3850e0a6dc7232f5f44197e79ffcc5642c1c5"),
-        "documento": get_val("176d2a0d5167d1edc9b949c75f8b9a7597eabe91"),
+        "nome_cliente": nome_cliente,
+        "endereco": endereco,
+        "cidade": cidade,
+        "documento": documento,
         "sole_web": numero_por_extenso_unidades(qtd_sole),
-        "valor_mensal": formatar_moeda(
-            get_val("c5dfc907c53bb12ca916f9d0d20df23e3847e54d")
-        ),
+        "valor_mensal": formatar_moeda(get_val(deal_data, FIELD_VALOR_MENSAL)),
         "valor_implantacao": formatar_moeda(
-            get_val("015407d5106c321a227f1ca881f920fe2e1042ec")
+            get_val(deal_data, FIELD_VALOR_IMPLANTACAO)
         ),
         "data_hoje": datetime.now().strftime("%d/%m/%Y"),
         "data_inicio": formatar_data_ptbr(
             deal_data.get("won_time") or deal_data.get("add_time")
         ),
-        "indicadores_qualidade": get_val("ffb2d5aec9acdee5a242ca19683bbf4caa24cd53"),
-        "qualidade_energia": get_val("c0a23912d889e00f51ed5bd08a55856a7e5dc930"),
+        "indicadores_qualidade": get_val(deal_data, FIELD_INDICADORES_QUALIDADE),
+        "qualidade_energia": get_val(deal_data, FIELD_QUALIDADE_ENERGIA),
         "data_pagamento_implantacao": dt_implantacao,
         "data_pagamento_primeira_cobranca": dt_primeira_cobranca,
-        "contato_gestor": get_val("ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"),
-        "contato_financeiro": get_val("722da69afe31c1f8fa4f5457a223e2a952ae0978"),
-        "contato_contratante": get_val("3002b2df87f0577585ebaec394fd09a38ca8778f"),
+        "contato_gestor": get_val(deal_data, FIELD_CONTATO_GESTOR),
+        "contato_financeiro": get_val(deal_data, FIELD_CONTATO_FINANCEIRO),
+        "contato_contratante": get_val(deal_data, FIELD_CONTATO_CONTRATANTE),
     }
 
     clean_title = str(deal_data.get("title", "SemTitulo")).replace("/", "-")
@@ -408,34 +480,69 @@ def processar_deals_pendentes():
                     print(f"    -> Enviando para Clicksign...")
                     envelope_name = f"Contrato Deal {deal_id} - {deal.get('title')}"
 
-                    clicksign_fire_and_forget(
+                    envelope_id = clicksign_fire_and_forget(
                         doc_path, envelope_name, sequence_dinamica
                     )
 
+                    salvar_envelope_pendente(deal_id, envelope_id, envelope_name)
                     salvar_deal_processado(deal_id)
                     print(
                         f"[v] Sucesso! Contrato enviado. Deal ID {deal_id} salvo no log."
                     )
+
+                    if TESTE_PLUNE_SEM_ASSINATURA:
+                        print(f"    -> [TESTE] Criando pedido Plune sem aguardar assinaturas...")
+                        try:
+                            result = criar_pedido_plune(deal_id)
+                            print(f"[v] Pedido Plune: {result}")
+                        except PluneError as exc:
+                            print(f"[!] Erro ao criar pedido Plune (deal {deal_id}): {exc}")
                 else:
                     print(
                         "[!] Nenhum e-mail de signatário encontrado no Deal. Contrato não enviado para assinatura."
                     )
-                    # Se não foi enviado porque falta email, podes decidir se salvas ou não no log.
-                    # Se não salvares, ele vai tentar enviar de novo no próximo polling (útil se o user preencher o email depois).
 
         except Exception as e:
             print(f"[!] Erro ao processar Deal {deal_id}: {e}")
+
+
+def processar_contratos_assinados():
+    """Quando o envelope Clicksign fechou (todos assinaram), cria o pedido no Plune."""
+    if TESTE_PLUNE_SEM_ASSINATURA:
+        return
+
+    pendentes = listar_aguardando_pedido_plune()
+    if not pendentes:
+        return
+
+    cs = ClicksignClient(CLICKSIGN_BASE_URL, CLICKSIGN_ACCESS_TOKEN)
+
+    for record in pendentes:
+        deal_id = str(record.get("deal_id"))
+        envelope_id = record.get("envelope_id")
+        status = cs.get_envelope_status(envelope_id)
+        if status != "closed":
+            continue
+
+        print(f"\n[!] Contrato assinado! Deal {deal_id} → criando pedido no Plune...")
+        try:
+            result = criar_pedido_plune(deal_id)
+            print(f"[v] Pedido Plune: {result}")
+        except PluneError as exc:
+            print(f"[!] Erro ao criar pedido Plune (deal {deal_id}): {exc}")
 
 
 def main():
     if not os.path.exists(PASTA_SAIDA):
         os.makedirs(PASTA_SAIDA)
 
-    print("--- INICIANDO AUTOMACAO V3 (POLLING PIPEDRIVE -> CLICKSIGN) ---")
+    print("--- INICIANDO AUTOMACAO (PIPEDRIVE -> CLICKSIGN -> PLUNE) ---")
     print(
         f"[*] Script iniciado em: {DATA_INICIO_SCRIPT.strftime('%d/%m/%Y %H:%M:%S')} UTC"
     )
     print(f"[*] Apenas deals ganhos após este momento serão processados.")
+    if TESTE_PLUNE_SEM_ASSINATURA:
+        print("[*] MODO TESTE: pedido Plune criado logo após envio ao Clicksign (sem assinaturas).")
     print(
         f"[*] Verificando Pipedrive a cada {INTERVALO_POLLING_SEGUNDOS} segundos...\n"
     )
@@ -443,6 +550,7 @@ def main():
     try:
         while True:
             processar_deals_pendentes()
+            processar_contratos_assinados()
             time.sleep(INTERVALO_POLLING_SEGUNDOS)
     except KeyboardInterrupt:
         print("\n[!] Automação encerrada pelo usuário.")

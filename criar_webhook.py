@@ -1,26 +1,22 @@
 import requests
 
-# CONFIG
-ACCESS_TOKEN = "541dc480-3b74-4dc6-99f7-b0b44de5ad67"
-BASE_URL = "https://app.clicksign.com/api/v3"
-
-# URL DO SEU SERVIDOR (Use webhook.site para testar se não tiver server ainda)
-# Exemplo: "https://webhook.site/seu-uuid-unico"
-URL_WEBHOOK = "https://webhook.site/70859493-04d8-4842-9820-ba23feb1f96a"
+from core.config import CLICKSIGN_ACCESS_TOKEN, CLICKSIGN_BASE_URL, CLICKSIGN_WEBHOOK_URL
 
 
 def criar_webhook():
-    url = f"{BASE_URL}/webhooks?access_token={ACCESS_TOKEN}"
+    if not CLICKSIGN_WEBHOOK_URL:
+        raise SystemExit("Defina CLICKSIGN_WEBHOOK_URL no .env")
+
+    url = f"{CLICKSIGN_BASE_URL}/webhooks?access_token={CLICKSIGN_ACCESS_TOKEN}"
 
     headers = {"Accept": "application/json", "Content-Type": "application/vnd.api+json"}
 
-    # Eventos: 'auto_close' dispara quando TODOS assinam e o envelope fecha.
     payload = {
         "data": {
             "type": "webhooks",
             "attributes": {
-                "endpoint": URL_WEBHOOK,
-                "events": ["auto_close", "sign"],  # auto_close = finalizado
+                "endpoint": CLICKSIGN_WEBHOOK_URL,
+                "events": ["auto_close", "sign"],
                 "status": "active",
             },
         }
