@@ -1,0 +1,1 @@
+https://www-gebras.plune.com.br/JSON/Venda.StatusLocatarioPedido/Browse?&Venda.StatusLocatarioPedido.Ativo=1&_Venda.StatusLocatarioPedido.BrowseSequence=Id,Descricao,Ativo&_Venda.StatusLocatarioPedido.BrowseLimit=100&__debug__=0

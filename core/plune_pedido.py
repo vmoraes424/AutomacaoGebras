@@ -7,16 +7,27 @@ Um único módulo: cliente Plune, mapeamento de campos e criação do pedido.
 from urllib.parse import urlencode
 
 import json
+import os
 import requests
+from datetime import datetime, timezone
 
 from .config import (
+    ARQUIVO_AVISOS_APROVACAO_PLUNE,
     PLUNE_AUTH_TOKEN,
     PLUNE_BASE_URL,
     PLUNE_BRANCH_ID,
     PLUNE_CENTRO_CUSTO_ID,
     PLUNE_COMPANY_ID,
+    PLUNE_FRETE_POR_CONTA,
+    PLUNE_PARCEIRO_TIPO,
+    PLUNE_PARAMETRO_CONTABIL_IMPLANTACAO_ID,
+    PLUNE_PARAMETRO_CONTABIL_RECORRENTE_ID,
     PLUNE_PRODUTO_SOLE_ID,
+    PLUNE_REGIONAL_SUBCENTRO2_MAP,
     PLUNE_STATUS_PEDIDO,
+    PLUNE_STATUS_PEDIDO_IMPLANTACAO_ID,
+    PLUNE_STATUS_PEDIDO_RECORRENTE_ID,
+    PLUNE_SUBCENTRO_CUSTO_ID,
     PLUNE_TIPO_CONTRATO_ID,
     PLUNE_TIPO_OP_ID,
 )
@@ -28,10 +39,13 @@ from .envelope_state import (
 from .pipedrive_fields import (
     FIELD_CIDADE,
     FIELD_CONTATO_CONTRATANTE,
+    FIELD_DATA_IMPLANTACAO,
     FIELD_DATA_PRIMEIRA_COBRANCA,
     FIELD_ENDERECO,
     FIELD_INDICADORES_QUALIDADE,
     FIELD_QUALIDADE_ENERGIA,
+    FIELD_QTD_SOLE,
+    FIELD_REGIONAL,
     FIELD_VALOR_IMPLANTACAO,
     FIELD_VALOR_MENSAL,
     buscar_deal_por_id,
@@ -39,7 +53,6 @@ from .pipedrive_fields import (
     formatar_decimal_plune,
     get_documento,
     get_nome_cliente,
-    get_numero_contrato,
     get_val,
     normalizar_documento,
     normalizar_nome,
@@ -48,6 +61,12 @@ from .pipedrive_fields import (
 
 class PluneError(RuntimeError):
     pass
+
+
+class PluneApiError(PluneError):
+    def __init__(self, message: str, raw_error: str | None = None):
+        super().__init__(message)
+        self.raw_error = raw_error or message
 
 
 # InsertPedidoBase (URLs.cs) — ordem na URL; Aprovado=1 logo após CompanyId
@@ -97,6 +116,33 @@ _PEDIDO_DEFAULTS = {
     "PercentualComissao": "0,001",
     "BranchId": PLUNE_BRANCH_ID,
     "TipoOpId": PLUNE_TIPO_OP_ID,
+    "FreteporConta": PLUNE_FRETE_POR_CONTA,
+}
+
+PARAMETRO_CONTABIL_PEDIDO_RECORRENTE = PLUNE_PARAMETRO_CONTABIL_RECORRENTE_ID
+PARAMETRO_CONTABIL_PEDIDO_IMPLANTACAO = PLUNE_PARAMETRO_CONTABIL_IMPLANTACAO_ID
+
+TIPO_PEDIDO_IMPLANTACAO = "implantacao"
+TIPO_PEDIDO_RECORRENTE = "recorrente"
+
+_TIPOS_PEDIDO_PLUNE = (
+    TIPO_PEDIDO_IMPLANTACAO,
+    TIPO_PEDIDO_RECORRENTE,
+)
+
+_PEDIDO_TIPO_CONFIG = {
+    TIPO_PEDIDO_IMPLANTACAO: {
+        "label": "Implantação",
+        "valor_field": FIELD_VALOR_IMPLANTACAO,
+        "status_pedido": PLUNE_STATUS_PEDIDO_IMPLANTACAO_ID,
+        "parametro_contabil": PARAMETRO_CONTABIL_PEDIDO_IMPLANTACAO,
+    },
+    TIPO_PEDIDO_RECORRENTE: {
+        "label": "Recorrente",
+        "valor_field": FIELD_VALOR_MENSAL,
+        "status_pedido": PLUNE_STATUS_PEDIDO_RECORRENTE_ID,
+        "parametro_contabil": PARAMETRO_CONTABIL_PEDIDO_RECORRENTE,
+    },
 }
 
 
@@ -126,7 +172,7 @@ def _plune_get(
     payload = json.loads(text)
     error = payload.get("ErrorStatus") or payload.get("ErrorStatus2")
     if error:
-        raise PluneError(f"Plune ErrorStatus: {error}")
+        raise PluneApiError(f"Plune ErrorStatus: {error}", str(error))
     return payload
 
 
@@ -152,6 +198,8 @@ _PARCEIRO_BROWSE_FIELDS = [
     "NumeroContribuinte",
     "NomRazaoSocial",
     "NomFantasia",
+    "ECliente",
+    "EFornecedor",
     "EnderecoPrincipal",
     "BairroPrincipal",
     "CidadePrincipalId",
@@ -161,6 +209,20 @@ _PARCEIRO_BROWSE_FIELDS = [
     "ContatoNome",
     "EMail",
 ]
+
+
+def _tipo_parceiro_flags() -> tuple[str, str]:
+    tipo = (PLUNE_PARCEIRO_TIPO or "cliente").strip().lower()
+    if tipo in ("fornecedor", "supplier"):
+        return "0", "1"
+    return "1", "0"
+
+
+def _campo_tipo_parceiro_browse() -> str:
+    e_cliente, e_fornecedor = _tipo_parceiro_flags()
+    if e_fornecedor == "1" and e_cliente == "0":
+        return "EFornecedor"
+    return "ECliente"
 
 
 def _row_para_parceiro(row: dict) -> dict:
@@ -175,6 +237,8 @@ def _row_para_parceiro(row: dict) -> dict:
         "documento_formatado": doc_fmt.strip(),
         "razao_social": _field_value(row, "NomRazaoSocial").strip(),
         "nome_fantasia": _field_value(row, "NomFantasia").strip(),
+        "e_cliente": _field_value(row, "ECliente"),
+        "e_fornecedor": _field_value(row, "EFornecedor"),
         "endereco": _field_value(row, "EnderecoPrincipal").strip(),
         "bairro": _field_value(row, "BairroPrincipal").strip(),
         "cidade": cidade.strip(),
@@ -206,6 +270,7 @@ def _buscar_parceiros_por_documento(documento: str) -> list[dict]:
     params = {
         f"{prefix}Ativo": "1",
         f"{prefix}NumeroContribuinte": doc_digits,
+        f"{prefix}{_campo_tipo_parceiro_browse()}": "1",
         "_Parceiro.tbParceiro.BrowseSequence": _PARCEIRO_BROWSE_FIELDS,
         "_Parceiro.tbParceiro.BrowseLimit": "30",
     }
@@ -260,6 +325,7 @@ def _montar_params_parceiro(deal: dict) -> dict:
     if not documento:
         raise PluneError("Deal sem CPF/CNPJ no Pipedrive")
 
+    e_cliente, e_fornecedor = _tipo_parceiro_flags()
     params = {
         "EmpresaId": PLUNE_COMPANY_ID,
         "NomFantasia": nome[:60],
@@ -267,8 +333,8 @@ def _montar_params_parceiro(deal: dict) -> dict:
         "Ativo": "1",
         "EmProspeccao": "0",
         "EmAprovacao": "0",
-        "ECliente": "1",
-        "EFornecedor": "0",
+        "ECliente": e_cliente,
+        "EFornecedor": e_fornecedor,
         "ERepresentante": "0",
         "Transportadora": "0",
         "NumeroContribuinte": documento,
@@ -358,41 +424,228 @@ def _aplicar_dados_cliente_pedido(params: dict, parceiro: dict) -> None:
         params["ClienteCep"] = parceiro["cep"][:8]
 
 
-def _montar_params_pedido(deal: dict, parceiro: dict) -> dict:
+def _valor_ativo(valor: str) -> bool:
+    texto = str(valor or "").strip().lower()
+    return texto not in (
+        "",
+        "0",
+        "0.0",
+        "0,0",
+        "0,00",
+        "false",
+        "nao",
+        "não",
+        "none",
+        "null",
+    )
+
+
+def _decimal_pipe(valor) -> float | None:
+    texto = str(valor or "").strip()
+    if not texto:
+        return None
+    # Aceita formatos comuns do Pipedrive/BR: 3000, 3000.50, 3.000,50, 3,000.50.
+    normalizado = texto.replace("R$", "").replace(" ", "")
+    if "," in normalizado and "." in normalizado:
+        if normalizado.rfind(",") > normalizado.rfind("."):
+            normalizado = normalizado.replace(".", "").replace(",", ".")
+        else:
+            normalizado = normalizado.replace(",", "")
+    elif "," in normalizado:
+        normalizado = normalizado.replace(".", "").replace(",", ".")
+    try:
+        return float(normalizado)
+    except ValueError:
+        return None
+
+
+def _valor_implantacao_valido_para_pedido(valor) -> bool:
+    numero = _decimal_pipe(valor)
+    return numero is not None and numero > 1
+
+
+def _flag_observacao(valor: str) -> str:
+    return "1" if _valor_ativo(valor) else "0"
+
+
+def _formatar_moeda_observacao(valor: str) -> str:
+    valor_formatado = formatar_decimal_plune(valor)
+    if valor_formatado:
+        return f"R$ {valor_formatado}"
+    return str(valor or "").strip()
+
+
+def _pedido_integracao_tipo(deal_id: str, tipo_pedido: str) -> str:
+    return f"{deal_id}-{tipo_pedido}"
+
+
+def _preco_item_pedido(valor: str) -> str:
+    valor_formatado = formatar_decimal_plune(valor)
+    return valor_formatado or "0,00"
+
+
+def _formatar_decimal_plune_numero(valor: float) -> str:
+    formatted = f"{valor:,.2f}"
+    return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _base_comissao_pedido(valor: str, tipo_pedido: str) -> str:
+    numero = _decimal_pipe(valor) or 0.0
+    if tipo_pedido == TIPO_PEDIDO_RECORRENTE:
+        numero *= 12
+    return _formatar_decimal_plune_numero(numero)
+
+
+def _somar_ucs_pipedrive(deal: dict) -> float:
+    campos = (
+        FIELD_QTD_SOLE,
+        FIELD_INDICADORES_QUALIDADE,
+        FIELD_QUALIDADE_ENERGIA,
+    )
+    return sum((_decimal_pipe(get_val(deal, campo)) or 0.0) for campo in campos)
+
+
+def _percentual_comissao_pedido(deal: dict, tipo_pedido: str) -> str:
+    if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO:
+        return "0,001"
+    return _formatar_decimal_plune_numero(_somar_ucs_pipedrive(deal))
+
+
+def _salvar_aviso_aprovacao_plune(mensagem: str) -> None:
+    pasta = os.path.dirname(ARQUIVO_AVISOS_APROVACAO_PLUNE)
+    if pasta:
+        os.makedirs(pasta, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with open(ARQUIVO_AVISOS_APROVACAO_PLUNE, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {mensagem}\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _montar_servicos_observacao(deal: dict) -> str:
+    servicos = []
+    if _valor_ativo(get_val(deal, FIELD_QTD_SOLE)):
+        servicos.append("SOLE WEB")
+    if _valor_ativo(get_val(deal, FIELD_QUALIDADE_ENERGIA)):
+        servicos.append("GESTÃO DA QUALIDADE")
+    if _valor_ativo(get_val(deal, FIELD_INDICADORES_QUALIDADE)):
+        servicos.append("INDICADORES DE QUALIDADE")
+    return " + ".join(servicos)
+
+
+def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
     deal_id = str(deal.get("id", ""))
     title = str(deal.get("title", "")).strip()
+    valor_mensal = get_val(deal, FIELD_VALOR_MENSAL)
+    valor_implantacao = get_val(deal, FIELD_VALOR_IMPLANTACAO)
+    qtd_sole = get_val(deal, FIELD_QTD_SOLE)
+    qualidade_energia = get_val(deal, FIELD_QUALIDADE_ENERGIA)
+    servicos = _montar_servicos_observacao(deal)
+
+    label_tipo = _PEDIDO_TIPO_CONFIG[tipo_pedido]["label"].upper()
+    observacao = [f"SERVIÇO ({label_tipo}):"]
+    if title and servicos:
+        observacao.append(f"{title}: {servicos}")
+    elif title:
+        observacao.append(title)
+    elif servicos:
+        observacao.append(servicos)
+
+    if tipo_pedido == TIPO_PEDIDO_RECORRENTE and valor_mensal:
+        observacao.extend(
+            ["", f"MENSALIDADE: {_formatar_moeda_observacao(valor_mensal)}"]
+        )
+
+    if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO and valor_implantacao:
+        observacao.extend(
+            ["", f"IMPLANTAÇÃO: {_formatar_moeda_observacao(valor_implantacao)}"]
+        )
+
+    if tipo_pedido == TIPO_PEDIDO_RECORRENTE:
+        observacao.extend(["", "ÊXITO GEBRAS: 20%"])
+
+    observacao.extend(
+        [
+            "",
+            "PROPOSTA COMERCIAL ANEXA.",
+            "",
+            "PIPEDRIVE:",
+            f"https://gebras.pipedrive.com/deal/{deal_id}",
+        ]
+    )
+
+    unidade_nf = title or get_nome_cliente(deal).strip()
+    if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO:
+        observacao_nf = "Faturamento referente à implantação de gestão de energia elétrica."
+    else:
+        observacao_nf = "Faturamento referente a gestão de energia elétrica."
+    if unidade_nf:
+        if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO:
+            observacao_nf = (
+                "Faturamento referente à implantação de gestão de energia elétrica "
+                f"da unidade {unidade_nf}."
+            )
+        else:
+            observacao_nf = (
+                "Faturamento referente a gestão de energia elétrica "
+                f"da unidade {unidade_nf}."
+            )
+
+    return {
+        "Observacao": "\n".join(observacao).strip(),
+        "ObservacaoNF": observacao_nf,
+        "x1_ObservacaoAnexo": "\n".join(
+            [
+                "Gestão Mercado Livre:0;",
+                f"SOLE Web (com telemetria):{_flag_observacao(qtd_sole)};",
+                f"Sole Consultoria:{_flag_observacao(qtd_sole)};",
+                "Gestão de Usina Fotovoltaica:0;",
+                f"Gestão de Qualidade de Energia:{_flag_observacao(qualidade_energia)};",
+            ]
+        ),
+    }
+
+
+def _montar_params_pedido(deal: dict, parceiro: dict, tipo_pedido: str) -> dict:
+    deal_id = str(deal.get("id", ""))
+    title = str(deal.get("title", "")).strip()
+    tipo_config = _PEDIDO_TIPO_CONFIG[tipo_pedido]
+    chave_integracao = _pedido_integracao_tipo(deal_id, tipo_pedido)
+    valor_pedido = get_val(deal, tipo_config["valor_field"])
 
     params = dict(_PEDIDO_DEFAULTS)
+    params["StatusPedido"] = tipo_config["status_pedido"]
     params["ClienteId"] = str(parceiro["id"])
-    params["Descricao"] = f"Deal {deal_id} - {title}"[:128]
-    params["PedidoIntegracao"] = deal_id
+    params["Descricao"] = f"{tipo_config['label']} - Deal {deal_id} - {title}"[:128]
+    params["PedidoIntegracao"] = chave_integracao
     params["DataEntrega"] = formatar_data_ptbr(deal.get("won_time") or deal.get("add_time"))
+    # ParametroContabilId = «Tipo de Lançamento» (FK _fkey_1364993941 em Pedido.md).
+    # Deve ser coerente com o tipo de faturamento do pedido — ver Pedido-colunas.md.
+    params["ParametroContabilId"] = tipo_config["parametro_contabil"]
+    params["BaseComissao"] = _base_comissao_pedido(valor_pedido, tipo_pedido)
+    params["PercentualComissao"] = _percentual_comissao_pedido(deal, tipo_pedido)
+    if PLUNE_SUBCENTRO_CUSTO_ID:
+        params["SubCentroCustoId"] = PLUNE_SUBCENTRO_CUSTO_ID
+    regional = get_val(deal, FIELD_REGIONAL).strip()
+    subcentro2_id = PLUNE_REGIONAL_SUBCENTRO2_MAP.get(regional)
+    if subcentro2_id:
+        params["SubCentroCusto2Id"] = str(subcentro2_id)
 
     _aplicar_dados_cliente_pedido(params, parceiro)
 
-    primeira_cobranca = get_val(deal, FIELD_DATA_PRIMEIRA_COBRANCA)
-    if primeira_cobranca:
-        params["x1_PrevisaoCobranca"] = formatar_data_ptbr(primeira_cobranca)
+    campo_previsao = (
+        FIELD_DATA_IMPLANTACAO
+        if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO
+        else FIELD_DATA_PRIMEIRA_COBRANCA
+    )
+    previsao_cobranca = get_val(deal, campo_previsao)
+    if previsao_cobranca:
+        params["x1_PrevisaoCobranca"] = formatar_data_ptbr(previsao_cobranca)
 
-    valor_mensal = get_val(deal, FIELD_VALOR_MENSAL)
-    valor_implantacao = get_val(deal, FIELD_VALOR_IMPLANTACAO)
     # Valor vai no item (PedidoItem.Preco); pseudoValorProduto/ValorTotal são calculados.
-    valor_pedido = valor_implantacao or valor_mensal
-    if valor_pedido:
-        params["_valor_item_preco"] = formatar_decimal_plune(valor_pedido)
+    params["_valor_item_preco"] = _preco_item_pedido(valor_pedido)
 
-    obs = [
-        f"Pipedrive deal_id={deal_id}",
-        f"contrato={get_numero_contrato(deal)}",
-    ]
-    for campo, label in (
-        (FIELD_INDICADORES_QUALIDADE, "indicadores"),
-        (FIELD_QUALIDADE_ENERGIA, "qualidade_energia"),
-    ):
-        val = get_val(deal, campo)
-        if val:
-            obs.append(f"{label}={val}")
-    params["Observacao"] = " | ".join(obs)
+    params.update(_montar_observacoes_pedido(deal, tipo_pedido))
 
     return params
 
@@ -416,16 +669,89 @@ def _montar_params_item_pedido(parceiro: dict, preco: str) -> dict:
     }
 
 
-def _montar_query_insert_pedido(deal: dict, parceiro: dict) -> list[tuple[str, str]]:
+def _buscar_pedido_id_por_pedido_integracao(deal_id: str) -> str | None:
+    """
+    Retorna Id do Venda.Pedido já existente com PedidoIntegracao = deal_id (Pipedrive).
+    Evita Insert duplicado quando o arquivo de estado local foi perdido ou não foi gravado.
+    """
+    prefix = "Venda.Pedido."
+    params = {
+        f"{prefix}CompanyId": PLUNE_COMPANY_ID,
+        f"{prefix}PedidoIntegracao": str(deal_id),
+        "_Venda.Pedido.BrowseSequence": ["Id"],
+        "_Venda.Pedido.BrowseLimit": "15",
+    }
+    payload = _plune_get("Venda.Pedido", "Browse", params)
+    rows = payload.get("data", {}).get("row", []) or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not rows:
+        return None
+    if len(rows) > 1:
+        print(
+            f"[!] Aviso: {len(rows)} pedidos no Plune com PedidoIntegracao={deal_id!r}; "
+            "tratando como já criado (primeiro registro)."
+        )
+    pedido_id = _field_value(rows[0], "Id")
+    return pedido_id.strip() if pedido_id else None
+
+
+def _buscar_pedido_por_pedido_integracao(pedido_integracao: str) -> dict | None:
+    prefix = "Venda.Pedido."
+    params = {
+        f"{prefix}CompanyId": PLUNE_COMPANY_ID,
+        f"{prefix}PedidoIntegracao": str(pedido_integracao),
+        "_Venda.Pedido.BrowseSequence": [
+            "Id",
+            "ClienteId",
+            "Aprovado",
+            "PedidoIntegracao",
+            "StatusPedido",
+        ],
+        "_Venda.Pedido.BrowseLimit": "15",
+    }
+    payload = _plune_get("Venda.Pedido", "Browse", params)
+    rows = payload.get("data", {}).get("row", []) or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not rows:
+        return None
+    if len(rows) > 1:
+        print(
+            f"[!] Aviso: {len(rows)} pedidos no Plune com PedidoIntegracao={pedido_integracao!r}; "
+            "usando o primeiro registro para aprovação."
+        )
+    row = rows[0]
+    return {
+        "id": _field_value(row, "Id"),
+        "cliente_id": _field_value(row, "ClienteId"),
+        "aprovado": _field_value(row, "Aprovado") in ("1", "1.0"),
+        "pedido_integracao": _field_value(row, "PedidoIntegracao") or pedido_integracao,
+        "status_pedido": _field_value(row, "StatusPedido"),
+    }
+
+
+def _montar_query_insert_pedido(
+    deal: dict, parceiro: dict, tipo_pedido: str
+) -> list[tuple[str, str]]:
     """Query do Insert na ordem do InsertPedidoBase (C#), com Venda.Pedido.Aprovado=1."""
-    params = _montar_params_pedido(deal, parceiro)
+    params = _montar_params_pedido(deal, parceiro, tipo_pedido)
     preco = params.pop("_valor_item_preco", None)
 
     pairs = list(_INSERT_PEDIDO_BASE_URL)
     for key, value in params.items():
-        if key in _INSERT_BASE_KEYS or value in (None, ""):
+        if value in (None, ""):
             continue
-        pairs.append((f"Venda.Pedido.{key}", str(value)))
+        if key in _INSERT_BASE_KEYS:
+            if key in ("StatusPedido", "PercentualComissao"):
+                target = f"Venda.Pedido.{key}"
+                pairs = [
+                    (k, str(value)) if k == target else (k, v)
+                    for k, v in pairs
+                ]
+            continue
+        else:
+            pairs.append((f"Venda.Pedido.{key}", str(value)))
 
     if not any(k == "Venda.Pedido.Aprovado" and v == "1" for k, v in pairs):
         pairs.insert(1, ("Venda.Pedido.Aprovado", "1"))
@@ -437,8 +763,175 @@ def _montar_query_insert_pedido(deal: dict, parceiro: dict) -> list[tuple[str, s
     return pairs
 
 
+def _criar_pedido_plune_tipo(
+    deal: dict, parceiro: dict, parceiro_criado: bool, tipo_pedido: str
+) -> dict:
+    deal_id = str(deal.get("id", ""))
+    tipo_config = _PEDIDO_TIPO_CONFIG[tipo_pedido]
+    chave_integracao = _pedido_integracao_tipo(deal_id, tipo_pedido)
+    criados = carregar_pedidos_plune_criados()
+
+    if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO:
+        valor_implantacao = get_val(deal, FIELD_VALOR_IMPLANTACAO)
+        if not _valor_implantacao_valido_para_pedido(valor_implantacao):
+            return {
+                "status": "skipped",
+                "deal_id": deal_id,
+                "tipo": tipo_pedido,
+                "pedido_integracao": chave_integracao,
+                "reason": "valor_implantacao_invalido_ou_menor_igual_1",
+                "valor_pipe": valor_implantacao,
+            }
+
+    if chave_integracao in criados:
+        return {
+            "status": "skipped",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "reason": "already_in_local_state",
+        }
+
+    pedido_existente = _buscar_pedido_id_por_pedido_integracao(chave_integracao)
+    if pedido_existente:
+        salvar_pedido_plune_criado(chave_integracao)
+        return {
+            "status": "skipped",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "reason": "already_in_plune",
+            "pedido_id": pedido_existente,
+        }
+
+    query_insert = _montar_query_insert_pedido(deal, parceiro, tipo_pedido)
+
+    payload = _plune_get("Venda.Pedido", "Insert", query_insert)
+    field = payload.get("Field") or {}
+    pedido_id = _field_value(field, "Id")
+    aprovado = _field_value(field, "Aprovado")
+    if aprovado not in ("1", "1.0"):
+        mensagem_aprovacao = (
+            "Plune não aprovou automaticamente o pedido após o Insert: "
+            f"enviado Venda.Pedido.Aprovado=1, mas o retorno veio Aprovado={aprovado or '0'}. "
+            f"PedidoId={pedido_id or '-'}, PedidoIntegracao={chave_integracao}, "
+            f"tipo={tipo_pedido}, StatusPedido={tipo_config['status_pedido']}, "
+            f"ParametroContabilId={tipo_config['parametro_contabil']}. "
+            "Validar permissão/regra do usuário/token da API para aprovar pedido no cadastro."
+        )
+        print(
+            f"[!] {mensagem_aprovacao}"
+        )
+        _salvar_aviso_aprovacao_plune(mensagem_aprovacao)
+    else:
+        mensagem_aprovacao = ""
+
+    salvar_pedido_plune_criado(chave_integracao)
+
+    result = {
+        "status": "created",
+        "deal_id": deal_id,
+        "tipo": tipo_pedido,
+        "pedido_integracao": chave_integracao,
+        "cliente_id": parceiro["id"],
+        "cliente_nome": parceiro.get("razao_social"),
+        "parceiro_criado": parceiro_criado,
+        "pedido_id": pedido_id,
+        "aprovado": aprovado in ("1", "1.0"),
+        "status_pedido": tipo_config["status_pedido"],
+        "parametro_contabil_id": tipo_config["parametro_contabil"],
+    }
+    if mensagem_aprovacao:
+        result["aviso_aprovacao"] = mensagem_aprovacao
+    return result
+
+
+def _aprovar_pedido_plune_tipo(deal_id: str, tipo_pedido: str) -> dict:
+    chave_integracao = _pedido_integracao_tipo(deal_id, tipo_pedido)
+    pedido = _buscar_pedido_por_pedido_integracao(chave_integracao)
+    if not pedido:
+        return {
+            "status": "missing",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "reason": "pedido_nao_encontrado",
+        }
+
+    if pedido["aprovado"]:
+        return {
+            "status": "skipped",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "pedido_id": pedido["id"],
+            "reason": "already_approved",
+        }
+
+    params = {
+        "Venda.Pedido.CompanyId": PLUNE_COMPANY_ID,
+        "Venda.Pedido.ClienteId": pedido["cliente_id"],
+        "Venda.Pedido.Id": pedido["id"],
+        "Venda.Pedido.Aprovado": "1",
+    }
+    try:
+        payload = _plune_get("Venda.Pedido", "Update", params)
+    except PluneError as exc:
+        erro_plune = getattr(exc, "raw_error", str(exc))
+        mensagem = (
+            "Plune não aprovou o pedido por Update: "
+            f"enviado Venda.Pedido.Aprovado=1, mas a API retornou erro: {exc}. "
+            f"PedidoId={pedido['id']}, PedidoIntegracao={chave_integracao}, tipo={tipo_pedido}. "
+            "A coluna Aprovado não aparece como alterável na documentação de Venda.Pedido; "
+            "validar com Plune qual ação/API deve ser usada para aprovar após assinatura."
+        )
+        print(f"[!] {mensagem}")
+        _salvar_aviso_aprovacao_plune(erro_plune)
+        return {
+            "status": "not_approved",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "pedido_id": pedido["id"],
+            "aprovado": False,
+            "aviso_aprovacao": mensagem,
+        }
+
+    field = payload.get("Field") or {}
+    aprovado = _field_value(field, "Aprovado")
+    aprovado_ok = aprovado in ("1", "1.0")
+    if not aprovado_ok:
+        mensagem = (
+            "Plune não aprovou automaticamente o pedido após Update: "
+            f"enviado Venda.Pedido.Aprovado=1, mas o retorno veio Aprovado={aprovado or '0'}. "
+            f"PedidoId={pedido['id']}, PedidoIntegracao={chave_integracao}, tipo={tipo_pedido}. "
+            "Validar permissão/regra do usuário/token da API para aprovar pedido no cadastro."
+        )
+        print(f"[!] {mensagem}")
+        _salvar_aviso_aprovacao_plune(mensagem)
+
+    result = {
+        "status": "approved" if aprovado_ok else "not_approved",
+        "deal_id": deal_id,
+        "tipo": tipo_pedido,
+        "pedido_integracao": chave_integracao,
+        "pedido_id": pedido["id"],
+        "aprovado": aprovado_ok,
+    }
+    if not aprovado_ok:
+        result["aviso_aprovacao"] = mensagem
+    return result
+
+
+def _pedidos_plune_deal_resolvidos(resultados: list[dict]) -> bool:
+    return all(
+        r.get("status") in ("created", "skipped")
+        for r in resultados
+    )
+
+
 def criar_pedido_plune(deal_id: str) -> dict:
-    """Pega o deal no Pipedrive e cria Venda.Pedido no Plune."""
+    """Pega o deal no Pipedrive e cria os pedidos de implantação e recorrência no Plune."""
     if not PLUNE_BRANCH_ID or not PLUNE_TIPO_OP_ID:
         raise PluneError(
             "Preencha PLUNE_BRANCH_ID e PLUNE_TIPO_OP_ID no .env "
@@ -446,9 +939,6 @@ def criar_pedido_plune(deal_id: str) -> dict:
         )
 
     deal_id = str(deal_id)
-    if deal_id in carregar_pedidos_plune_criados():
-        return {"status": "skipped", "deal_id": deal_id}
-
     deal = buscar_deal_por_id(deal_id)
     if not deal:
         raise PluneError(f"Deal {deal_id} não encontrado no Pipedrive")
@@ -458,28 +948,54 @@ def criar_pedido_plune(deal_id: str) -> dict:
         raise PluneError(f"Deal {deal_id} sem CNPJ no Pipedrive")
 
     parceiro, parceiro_criado = _resolver_ou_criar_parceiro(deal)
-    query_insert = _montar_query_insert_pedido(deal, parceiro)
-
-    payload = _plune_get("Venda.Pedido", "Insert", query_insert)
-    field = payload.get("Field") or {}
-    pedido_id = _field_value(field, "Id")
-    aprovado = _field_value(field, "Aprovado")
-    if aprovado not in ("1", "1.0"):
-        print(
-            "[!] Plune retornou Aprovado="
-            f"{aprovado or '0'} após Insert (URL enviou Venda.Pedido.Aprovado=1). "
-            "O token da API pode não ter permissão de aprovação no cadastro."
+    resultados = []
+    for tipo_pedido in _TIPOS_PEDIDO_PLUNE:
+        resultados.append(
+            _criar_pedido_plune_tipo(deal, parceiro, parceiro_criado, tipo_pedido)
         )
 
-    salvar_pedido_plune_criado(deal_id)
-    marcar_pedido_criado(deal_id, pedido_id)
+    if _pedidos_plune_deal_resolvidos(resultados):
+        ids = [
+            str(r.get("pedido_id"))
+            for r in resultados
+            if r.get("pedido_id") not in (None, "")
+        ]
+        marcar_pedido_criado(deal_id, ",".join(ids) if ids else None)
+
+    if any(r.get("status") == "created" for r in resultados):
+        status = "created"
+    elif all(r.get("status") == "skipped" for r in resultados):
+        status = "skipped"
+    else:
+        status = "partial"
 
     return {
-        "status": "created",
+        "status": status,
         "deal_id": deal_id,
         "cliente_id": parceiro["id"],
         "cliente_nome": parceiro.get("razao_social"),
         "parceiro_criado": parceiro_criado,
-        "pedido_id": pedido_id,
-        "aprovado": aprovado in ("1", "1.0"),
+        "pedidos": resultados,
+    }
+
+
+def aprovar_pedidos_plune(deal_id: str) -> dict:
+    """Após assinatura do contrato, marca os dois pedidos Plune do deal como Aprovado=1."""
+    deal_id = str(deal_id)
+    resultados = []
+    for tipo_pedido in _TIPOS_PEDIDO_PLUNE:
+        resultados.append(_aprovar_pedido_plune_tipo(deal_id, tipo_pedido))
+    if any(r.get("status") == "approved" for r in resultados):
+        status = "approved"
+    elif all(r.get("status") == "skipped" for r in resultados):
+        status = "skipped"
+    elif any(r.get("status") == "missing" for r in resultados):
+        status = "missing"
+    else:
+        status = "not_approved"
+
+    return {
+        "status": status,
+        "deal_id": deal_id,
+        "pedidos": resultados,
     }

@@ -28,8 +28,16 @@ Arquivos gerados na pasta `contratos/` seguem o padrão `Contrato_{id_do_deal}_{
 2. **Polling**: a cada intervalo configurável, chama a API do Pipedrive (`/api/v2/deals`, `status=won`).
 3. **Filtro**: ignora deals sem `won_time`, já listados em `deals_processados.txt`, ou com data de vitória anterior ao início do script.
 4. **Geração**: monta o contexto a partir dos **hashes dos custom fields** do Pipedrive (cada hash corresponde a um campo do formulário do deal), formata moeda e datas em padrão brasileiro, gera número de contrato e texto de unidades por extenso quando aplicável, e grava o `.docx` em `contratos/`.
-5. **Signatários**: lê e-mails dos custom fields em **ordem fixa** (Coordenador Principal → Contato Principal → Gestor Gebras → Diretor Principal). Só cria envelope se houver pelo menos um signatário com e-mail.
-6. **Clicksign (API v3)**: cria envelope, envia o documento em Base64, cria signatários em **grupos sequenciais** (1, 2, 3…), exige assinatura e evidência por e-mail, ativa o envelope e dispara notificação ao primeiro grupo.
+5. **Signatários**: lê e-mails dos custom fields em **ordem fixa** (Coordenador Principal → Contato Principal → Gestor Gebras → Diretor Principal). Envelope no Clicksign só é criado se houver pelo menos um signatário com e-mail **e** `DEV_PULAR_CLICKSIGN` estiver desligado; com `DEV_PULAR_CLICKSIGN=true`, o envio ao Clicksign é ignorado (não exige signatários para concluir o fluxo de geração do arquivo e registro do deal).
+6. **Clicksign (API v3)** *(omitido se `DEV_PULAR_CLICKSIGN=true` no `.env`)*: cria envelope, envia o documento em Base64, etc. Em **desenvolvimento**, ativar `DEV_PULAR_CLICKSIGN` evita chamadas à API (e rate limit): o `.docx` continua sendo gerado em `contratos/`; combine com `TESTE_PLUNE_SEM_ASSINATURA=true` para ainda criar o pedido no Plune.
+7. **Plune**: ao liberar o pedido (em teste logo após o contrato, ou em produção após assinatura), o sistema cria dois `Venda.Pedido` por deal: `implantacao` (`PedidoIntegracao=<deal_id>-implantacao`, `StatusPedido=31`) e `recorrente` (`PedidoIntegracao=<deal_id>-recorrente`, `StatusPedido=33`). Ambos nascem com `FreteporConta=9` (`Sem Frete`). O `ParametroContabilId` depende da filial: Matriz (`BranchId=751`) usa recorrente `1077` e implantação `1440`; ISM (`BranchId=790`) usa recorrente `1102` e implantação `1436`.
+
+## Variável `DEV_PULAR_CLICKSIGN` (desenvolvimento)
+
+| Valor | Efeito |
+|-------|--------|
+| `false` (padrão) | Fluxo normal: envia o contrato ao Clicksign após gerar o Word. |
+| `true` | **Não** chama a API Clicksign (nenhum upload, envelope ou assinatura). O arquivo `contratos/Contrato_….docx` é gerado e o deal pode ser marcado em `deals_processados`; não há linha nova em `envelopes_pendentes.json` para esse fluxo. Para testar **Plune** sem Clicksign, use também `TESTE_PLUNE_SEM_ASSINATURA=true`. Em produção, mantenha `false`. |
 
 ## Script de webhook (`criar_webhook.py`)
 

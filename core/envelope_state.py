@@ -36,6 +36,8 @@ def salvar_envelope_pendente(deal_id: str, envelope_id: str, envelope_name: str)
             "envelope_name": envelope_name,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "pedido_plune_criado": False,
+            "pedidos_plune_criados": False,
+            "pedidos_plune_aprovados": False,
         }
     )
     _save_envelopes(records)
@@ -62,8 +64,19 @@ def marcar_pedido_criado(deal_id: str, pedido_id: str | None = None) -> None:
     for record in records:
         if str(record.get("deal_id")) == deal_id:
             record["pedido_plune_criado"] = True
+            record["pedidos_plune_criados"] = True
             if pedido_id is not None:
                 record["pedido_plune_id"] = str(pedido_id)
+    _save_envelopes(records)
+
+
+def marcar_pedidos_aprovados(deal_id: str) -> None:
+    records = _load_envelopes()
+    deal_id = str(deal_id)
+    for record in records:
+        if str(record.get("deal_id")) == deal_id:
+            record["pedidos_plune_aprovados"] = True
+            record["pedido_plune_aprovado"] = True
     _save_envelopes(records)
 
 
@@ -91,13 +104,14 @@ def salvar_pedido_plune_criado(deal_id: str) -> None:
         os.makedirs(pasta_estado, exist_ok=True)
     with open(ARQUIVO_PEDIDOS_PLUNE_CRIADOS, "a", encoding="utf-8") as f:
         f.write(f"{deal_id}\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def listar_aguardando_pedido_plune() -> list:
-    """Envelopes enviados ao Clicksign cujo pedido Plune ainda não foi criado."""
+    """Envelopes enviados ao Clicksign cujos pedidos Plune ainda não foram aprovados."""
     return [
         r
         for r in _load_envelopes()
-        if not r.get("pedido_plune_criado")
-        and str(r.get("deal_id")) not in carregar_pedidos_plune_criados()
+        if not r.get("pedidos_plune_aprovados") and not r.get("pedido_plune_aprovado")
     ]

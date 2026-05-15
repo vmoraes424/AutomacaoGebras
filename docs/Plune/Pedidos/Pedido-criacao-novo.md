@@ -102,6 +102,16 @@ Regras de **pareamento** de várias linhas: todos os campos da embutida repetido
 6. **Descrição / datas** úteis operacionalmente: `Descricao`, `DataEntrega` — ver [Pedido-colunas.md](Pedido-colunas.md) (Geral / Detalhes).
 7. **Itens:** `Slaves` / `SlavesSave` / `isSlave` + produto, quantidade, preço, **filial no item** se necessário.
 
+### Centro de custo Gebras (Regional do Pipe)
+
+Para o fluxo de contratos, a hierarquia do pedido deve ser preenchida nesta ordem:
+
+1. `Venda.Pedido.CentroCustoId` = Centro **CONTRATOS COMERCIAIS** (`PLUNE_CENTRO_CUSTO_ID`).
+2. `Venda.Pedido.SubCentroCustoId` = Sub Centro **GESTÃO DE ENERGIA** (`PLUNE_SUBCENTRO_CUSTO_ID`).
+3. `Venda.Pedido.SubCentroCusto2Id` = Sub Centro Nível 2, por de/para do campo **REGIONAL** do Pipedrive (`PLUNE_REGIONAL_SUBCENTRO2_MAP`), por exemplo `{"Regional 1":"<id no Plune>"}`.
+
+O token atual pode não ter permissão para listar `Company.CentroCusto`, `Company.SubCentroCusto` e `Company.SubCentroCustoNivel2`; nesse caso os IDs devem ser obtidos pela tela do Plune e configurados no `.env`.
+
 ---
 
 ## Colunas úteis para integração (referência rápida)

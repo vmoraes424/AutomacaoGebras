@@ -4,6 +4,7 @@ Edite .env na raiz do projeto; config.py expõe as constantes para o resto do c�
 """
 
 import os
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,6 +29,13 @@ def _env_int(key: str, default: int) -> int:
     if raw is None or not raw.strip():
         return default
     return int(raw.strip())
+
+
+def _env_json(key: str, default):
+    raw = os.environ.get(key)
+    if raw is None or not raw.strip():
+        return default
+    return json.loads(raw)
 
 
 def _env_path(key: str, default: str) -> str:
@@ -57,6 +65,8 @@ CLICKSIGN_BASE_URL = _env("CLICKSIGN_BASE_URL", "https://app.clicksign.com/api/v
 CLICKSIGN_WEBHOOK_URL = _env("CLICKSIGN_WEBHOOK_URL")
 CLICKSIGN_RATE_LIMIT_MAX_RETRIES = _env_int("CLICKSIGN_RATE_LIMIT_MAX_RETRIES", 12)
 CLICKSIGN_RATE_LIMIT_BUFFER_SEC = _env_int("CLICKSIGN_RATE_LIMIT_BUFFER_SEC", 1)
+# Desenvolvimento: não envia contrato à API Clicksign (evita rate limit / espera longa).
+DEV_PULAR_CLICKSIGN = _env_bool("DEV_PULAR_CLICKSIGN", False)
 
 # --- Plune ---
 PLUNE_BASE_URL = _env("PLUNE_BASE_URL", "https://www-gebras.plune.com.br")
@@ -67,7 +77,19 @@ PLUNE_TIPO_OP_ID = _env("PLUNE_TIPO_OP_ID", "20")  # Tipo de Operação NF (padr
 PLUNE_STATUS_PEDIDO = _env("PLUNE_STATUS_PEDIDO", "32")
 PLUNE_TIPO_CONTRATO_ID = _env("PLUNE_TIPO_CONTRATO_ID", "3")
 PLUNE_CENTRO_CUSTO_ID = _env("PLUNE_CENTRO_CUSTO_ID", "5")
+PLUNE_SUBCENTRO_CUSTO_ID = _env("PLUNE_SUBCENTRO_CUSTO_ID")
 PLUNE_PRODUTO_SOLE_ID = _env("PLUNE_PRODUTO_SOLE_ID", "5584")
+PLUNE_PARCEIRO_TIPO = _env("PLUNE_PARCEIRO_TIPO", "cliente").lower()
+PLUNE_STATUS_PEDIDO_IMPLANTACAO_ID = _env("PLUNE_STATUS_PEDIDO_IMPLANTACAO_ID", "31")
+PLUNE_STATUS_PEDIDO_RECORRENTE_ID = _env("PLUNE_STATUS_PEDIDO_RECORRENTE_ID", "33")
+PLUNE_FRETE_POR_CONTA = _env("PLUNE_FRETE_POR_CONTA", "9")
+PLUNE_REGIONAL_SUBCENTRO2_MAP = _env_json("PLUNE_REGIONAL_SUBCENTRO2_MAP", {})
+PLUNE_PARAMETRO_CONTABIL_RECORRENTE_ID = _env(
+    "PLUNE_PARAMETRO_CONTABIL_RECORRENTE_ID", "1077"
+)
+PLUNE_PARAMETRO_CONTABIL_IMPLANTACAO_ID = _env(
+    "PLUNE_PARAMETRO_CONTABIL_IMPLANTACAO_ID", "1436"
+)
 
 # --- Automação ---
 INTERVALO_POLLING_SEGUNDOS = _env_int("INTERVALO_POLLING_SEGUNDOS", 30)
@@ -90,4 +112,8 @@ ARQUIVO_PEDIDOS_PLUNE_CRIADOS = _env_path_with_legacy(
     "ARQUIVO_PEDIDOS_PLUNE_CRIADOS",
     "runtime/state/pedidos_plune_criados.txt",
     "pedidos_plune_criados.txt",
+)
+ARQUIVO_AVISOS_APROVACAO_PLUNE = _env_path(
+    "ARQUIVO_AVISOS_APROVACAO_PLUNE",
+    "runtime/state/avisos_aprovacao_plune.txt",
 )
