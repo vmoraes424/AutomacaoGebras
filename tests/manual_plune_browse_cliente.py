@@ -1,8 +1,8 @@
 """
 Teste: buscar parceiro no Plune por CPF/CNPJ (UrlClientes.md).
 
-  python tests/test_plune_browse_cliente.py 359.696.440-72
-  python tests/test_plune_browse_cliente.py 52398605000186
+  python tests/manual_plune_browse_cliente.py 359.696.440-72
+  python tests/manual_plune_browse_cliente.py 52398605000186
 """
 
 import sys
@@ -12,7 +12,7 @@ from core.plune_pedido import buscar_parceiro_plune_por_documento
 
 def main():
     if len(sys.argv) < 2:
-        print("Uso: python tests/test_plune_browse_cliente.py <documento> [razao_social_pipe]")
+        print("Uso: python tests/manual_plune_browse_cliente.py <documento> [razao_social_pipe]")
         sys.exit(1)
 
     documento = sys.argv[1]

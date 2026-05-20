@@ -137,8 +137,9 @@ Campos do deal usados na etapa de cliente/pedido (`pipedrive_fields.py`):
 |-----|-------------------------------------|----------------|
 | Documento (busca Browse) | `FIELD_DOCUMENTO` | `NumeroContribuinte` → `ClienteId` |
 | Razão social (desambiguação + pedido) | `FIELD_NOME_CLIENTE` | `NomRazaoSocial` → `ClienteNome` |
-| Endereço | `FIELD_ENDERECO` | `ClienteEndereco` |
-| Cidade | `FIELD_CIDADE` | `ClienteCityName` |
+| Endereço | `FIELD_ENDERECO` | `EnderecoPrincipal` → `ClienteEndereco` |
+| CEP (obrigatório só ao **criar** parceiro novo) | `FIELD_CEP` | `CEPPrincipal` → `ClienteCep` |
+| Cidade | `FIELD_CIDADE` | `CidadePrincipalEx` → `ClienteCityName` |
 
 [↑ Voltar ao índice](#indice)
 

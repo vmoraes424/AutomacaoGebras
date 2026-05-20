@@ -4,25 +4,40 @@ from datetime import datetime
 import requests
 
 from .config import PIPEDRIVE_API_TOKEN
+from .database import default_branch_id, resolve_filial_branch
 
 # --- Hashes dos custom fields (Pipedrive) ---
 FIELD_NUMERO_CONTRATO_P1 = "14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b"
 FIELD_NUMERO_CONTRATO_P2 = "41a3157128d51e2fc803eeec4b242efafcb55b4e"
 FIELD_NOME_CLIENTE = "28d491e0263008b437e28fc55bbad8302c4646c8"
 FIELD_ENDERECO = "81566ac6e038bb0ba3adfa122c798b3e497b7538"
+FIELD_CEP = "6d3373f7ee86c7d2449824136baf3ee1938a8ef1"
 FIELD_CIDADE = "2bf3850e0a6dc7232f5f44197e79ffcc5642c1c5"
 FIELD_DOCUMENTO = "176d2a0d5167d1edc9b949c75f8b9a7597eabe91"
 FIELD_QTD_SOLE = "f9923cdce1274da8c10cec1b9ab561e024504620"
-FIELD_VALOR_MENSAL = "c5dfc907c53bb12ca916f9d0d20df23e3847e54d"
+FIELD_VALOR_MENSAL = "2a331c4b62c9d46aae9451af25eca2d08a3fdf0a"  # Valor Recorrência
 FIELD_VALOR_IMPLANTACAO = "015407d5106c321a227f1ca881f920fe2e1042ec"
 FIELD_DATA_IMPLANTACAO = "2b8f62a107891e26390459cfa4048b3eedade11b"
 FIELD_DATA_PRIMEIRA_COBRANCA = "f5f69ea52e5f65b37c9672fdb4dcfb3b6a4cdbb2"
 FIELD_INDICADORES_QUALIDADE = "ffb2d5aec9acdee5a242ca19683bbf4caa24cd53"
 FIELD_QUALIDADE_ENERGIA = "c0a23912d889e00f51ed5bd08a55856a7e5dc930"
+FIELD_GESTAO_ACL = "8f998d4877d478b3905c126d8b23f205d0686b77"
+FIELD_GESTAO_USINA_FOTOVOLTAICA = "1ba1794470354856aaca3e784349cd5f9f4d074e"
+
+# Campos numéricos de serviço (UCs) usados em contrato, comissão e observações Plune
+CAMPOS_SERVICO_UC = (
+    FIELD_QTD_SOLE,
+    FIELD_INDICADORES_QUALIDADE,
+    FIELD_QUALIDADE_ENERGIA,
+    FIELD_GESTAO_ACL,
+    FIELD_GESTAO_USINA_FOTOVOLTAICA,
+)
 FIELD_CONTATO_GESTOR = "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"
 FIELD_CONTATO_FINANCEIRO = "722da69afe31c1f8fa4f5457a223e2a952ae0978"
 FIELD_CONTATO_CONTRATANTE = "3002b2df87f0577585ebaec394fd09a38ca8778f"
 FIELD_REGIONAL = "3b5fc4072a4bff3e5e24dce974d20e15c6ebaed6"
+FIELD_SUBCENTRO_NIVEL_3 = "4f6e152a7d4f89dbd6664ef97980531394721599"
+FIELD_FILIAL = "be20f11317ac66845bf97695f43e57795e26d01d"
 
 SIGNER_FIELDS = [
     ("Coordenador Principal", "92359b129485b08fd024b8c28ef022e7635419a3"),
@@ -44,6 +59,55 @@ def get_val(deal_data: dict, code: str) -> str:
     return str(v) if v is not None else ""
 
 
+def get_filial_chaves(deal_data: dict) -> tuple[str, str]:
+    """Retorna (rótulo, id da opção) do enum Filial para mapeamento no Plune."""
+    raw = get_custom_fields(deal_data).get(FIELD_FILIAL)
+    if isinstance(raw, dict):
+        label = str(raw.get("label") or raw.get("name") or "").strip()
+        opt_id = str(raw.get("id") or raw.get("value") or "").strip()
+        return label, opt_id
+    texto = str(raw or "").strip()
+    return texto, texto
+
+
+def get_filial_label(deal_data: dict) -> str:
+    label, _ = get_filial_chaves(deal_data)
+    return label
+
+
+def resolver_branch_id(deal_data: dict) -> str:
+    """Filial (Pipedrive) -> Venda.Pedido.BranchId (tabela pipedrive_filial no MySQL)."""
+    label, opt_id = get_filial_chaves(deal_data)
+    branch_id = resolve_filial_branch(label, opt_id)
+    if branch_id:
+        return branch_id
+    fallback = default_branch_id()
+    if fallback:
+        return fallback
+    raise ValueError(
+        "Filial do deal não mapeada para BranchId no Plune. "
+        f"Valor no Pipedrive: {get_filial_label(deal_data) or opt_id!r}. "
+        "Cadastre em pipedrive_filial (MySQL) ou defina default_branch_id em app_meta."
+    )
+
+
+def settings_por_branch(branch_id: str) -> dict:
+    from .database import branch_config
+    from .plune_catalog import garantir_catalogo_inicializado
+
+    garantir_catalogo_inicializado()
+    cfg = branch_config(str(branch_id))
+    if cfg:
+        return cfg
+    return {
+        "subcentro_custo_id": "",
+        "parametro_recorrente": "",
+        "parametro_implantacao": "",
+        "regional_map": {},
+        "subcentro3_map": {},
+    }
+
+
 def get_nome_cliente(deal_data: dict) -> str:
     return get_val(deal_data, FIELD_NOME_CLIENTE).strip()
 
@@ -60,6 +124,11 @@ def get_numero_contrato(deal_data: dict) -> str:
 
 def normalizar_documento(documento: str) -> str:
     return re.sub(r"\D", "", documento or "")
+
+
+def normalizar_cep(cep: str) -> str:
+    """Somente dígitos, até 8 (Ultra::CEP no Plune)."""
+    return re.sub(r"\D", "", cep or "")[:8]
 
 
 def normalizar_nome(nome: str) -> str:

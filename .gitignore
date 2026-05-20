@@ -10,9 +10,8 @@ __pycache__/
 contratos/
 runtime/state/*.txt
 runtime/state/*.json
-deals_processados.txt
-envelopes_pendentes.json
-pedidos_plune_criados.txt
+runtime/state/*.db
+runtime/state/*.db-journal
 
 # Temp/lock artifacts
 _classcgi_out.html

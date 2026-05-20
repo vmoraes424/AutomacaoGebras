@@ -16,7 +16,7 @@ You are the **system understanding** specialist for the **Automacao Gebras (cont
 
 - **Trigger**: Pipedrive deal marked **won**; only deals with `won_time` **after** the UTC start time of a running `automacao_contrato.py` process are eligible (avoids backfilling old wins).
 - **Pipeline**: Polling Pipedrive → build context from **custom field hashes** → render `contrato_padrao.docx` with **docxtpl** → save under `contratos/` → create Clicksign envelope (API v3), upload document Base64, signers in **sequential groups**, activate, notify first group.
-- **State**: `deals_processados.txt` stores processed deal IDs after a **successful** Clicksign send.
+- **State**: MySQL `gebras_automacao` (`deals_processed`, etc.) stores processed deals after a **successful** Clicksign send.
 - **Edge case**: If **no** signatário e-mails are present, the `.docx` may still be generated but **no** envelope is created and the deal is **not** logged as processed (retry after CRM fix).
 - **Webhook script**: `criar_webhook.py` only **registers** the webhook; **handling** inbound events is out of repo scope unless code is added.
 

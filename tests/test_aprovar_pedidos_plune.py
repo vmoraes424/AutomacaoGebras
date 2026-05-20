@@ -1,0 +1,43 @@
+"""Testes unitários: aprovação de pedidos em paralelo."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import patch
+
+from core.plune_pedido import (
+    TIPO_PEDIDO_IMPLANTACAO,
+    TIPO_PEDIDO_RECORRENTE,
+    aprovar_pedidos_plune,
+)
+
+
+class TestAprovarPedidosPlune:
+    @patch("core.plune_pedido.DEV_PLUNE_APROVADO_NAO", False)
+    @patch("core.plune_pedido._aprovar_pedido_plune_tipo")
+    @patch("core.plune_pedido.CacheAnexosDeal")
+    def test_paralelo_e_ordenacao(self, mock_cache_cls, mock_aprovar):
+        cache = mock_cache_cls.return_value
+        inicios = []
+
+        def _aprovar(deal_id, tipo, **kwargs):
+            inicios.append((tipo, time.perf_counter()))
+            time.sleep(0.05)
+            return {
+                "status": "approved",
+                "tipo": tipo,
+                "deal_id": deal_id,
+                "pedido_id": "1",
+            }
+
+        mock_aprovar.side_effect = _aprovar
+        out = aprovar_pedidos_plune("746", data_entrega="19/05/2026")
+        assert out["status"] == "approved"
+        assert out["pedidos"][0]["tipo"] == TIPO_PEDIDO_IMPLANTACAO
+        assert out["pedidos"][1]["tipo"] == TIPO_PEDIDO_RECORRENTE
+        assert out["data_entrega"] == "19/05/2026"
+        cache.iniciar_prefetch_assincrono.assert_called_once_with(
+            proposta=False, contrato=True
+        )
+        if len(inicios) == 2:
+            assert abs(inicios[0][1] - inicios[1][1]) < 0.04

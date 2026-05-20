@@ -99,18 +99,19 @@ Regras de **pareamento** de várias linhas: todos os campos da embutida repetido
 3. Campos de **situação** exigidos pelo cadastro (`Status`, `StatusPedido`, `Aprovado`, …) — ver [Pedido-colunas.md — chaves e cadastro geral](Pedido-colunas.md#chaves-e-cadastro-geral).
 4. **Faturamento / NF** mínimos se aplicável: `TipoOpId` (NN), `ModeloId`, `Serie`, `NaturezaOperacaoServicoId`, `CentroCustoId` / subcentros — ver [Pedido-colunas.md — faturamento](Pedido-colunas.md#faturamento-nf-e-centro-de-custo).
 5. **Contrato** se o tipo de pedido depender: `TipoContratoId` — ver [Pedido-colunas.md — contrato](Pedido-colunas.md#contrato).
-6. **Descrição / datas** úteis operacionalmente: `Descricao`, `DataEntrega` — ver [Pedido-colunas.md](Pedido-colunas.md) (Geral / Detalhes).
+6. **Descrição / datas** úteis operacionalmente: `Descricao` no Insert; **`DataEntrega`** (Detalhes \| Outros) **somente na aprovação** pós-Clicksign — data da última assinatura do envelope (`Venda.Pedido.Update` com `Aprovado=1`). No Insert o pedido fica não aprovado e sem data de entrega. Ver [Pedido-colunas.md](Pedido-colunas.md).
 7. **Itens:** `Slaves` / `SlavesSave` / `isSlave` + produto, quantidade, preço, **filial no item** se necessário.
 
 ### Centro de custo Gebras (Regional do Pipe)
 
 Para o fluxo de contratos, a hierarquia do pedido deve ser preenchida nesta ordem:
 
-1. `Venda.Pedido.CentroCustoId` = Centro **CONTRATOS COMERCIAIS** (`PLUNE_CENTRO_CUSTO_ID`).
-2. `Venda.Pedido.SubCentroCustoId` = Sub Centro **GESTÃO DE ENERGIA** (`PLUNE_SUBCENTRO_CUSTO_ID`).
-3. `Venda.Pedido.SubCentroCusto2Id` = Sub Centro Nível 2, por de/para do campo **REGIONAL** do Pipedrive (`PLUNE_REGIONAL_SUBCENTRO2_MAP`), por exemplo `{"Regional 1":"<id no Plune>"}`.
+1. `Venda.Pedido.CentroCustoId` = Centro **CONTRATOS COMERCIAIS** (`PLUNE_CENTRO_CUSTO_ID` em `core/gebras_defaults.py`).
+2. `Venda.Pedido.SubCentroCustoId` = Sub Centro **GESTÃO DE ENERGIA** (por filial em `PLUNE_BRANCH_SETTINGS`).
+3. `Venda.Pedido.SubCentroCusto2Id` = Sub Centro Nível 2 do Pipedrive (`regional_subcentro2_map` em `PLUNE_BRANCH_SETTINGS`).
+4. `Venda.Pedido.SubCentroCusto3Id` = Sub Centro Nível 3 do Pipedrive (`subcentro3_map` em `PLUNE_BRANCH_SETTINGS`), hash `4f6e152a7d4f89dbd6664ef97980531394721599`.
 
-O token atual pode não ter permissão para listar `Company.CentroCusto`, `Company.SubCentroCusto` e `Company.SubCentroCustoNivel2`; nesse caso os IDs devem ser obtidos pela tela do Plune e configurados no `.env`.
+O token atual pode não ter permissão para listar `Company.CentroCusto`, `Company.SubCentroCusto`, `Company.SubCentroCustoNivel2` e `Company.SubCentroCustoNivel3`; nesse caso os IDs devem ser obtidos pela tela do Plune e configurados em `core/gebras_defaults.py`.
 
 ---
 

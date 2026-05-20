@@ -1,6 +1,6 @@
 ---
 name: gebras-automacao-contratos
-description: Orients changes and answers architecture questions for the Gebras contract automation (Pipedrive won deals → docxtpl Word from contrato_padrao.docx → Clicksign API v3 sequential signing). Use when working in AutomacaoGebras, editing automacao_contrato.py or criar_webhook.py, ENTENDIMENTO_SISTEMA.md, contrato_padrao.docx placeholders, deals_processados.txt, contratos/ output, Pipedrive custom field hashes, or Clicksign webhooks and envelopes.
+description: Orients changes and answers architecture questions for the Gebras contract automation (Pipedrive won deals → docxtpl Word from contrato_padrao.docx → Clicksign API v3 sequential signing). Use when working in AutomacaoGebras, editing automacao_contrato.py or criar_webhook.py, ENTENDIMENTO_SISTEMA.md, contrato_padrao.docx placeholders, MySQL gebras_automacao / automacao_db CLI, contratos/ output, Pipedrive custom field hashes, or Clicksign webhooks and envelopes.
 disable-model-invocation: true
 ---
 
@@ -13,11 +13,11 @@ Para **entendimento do sistema**, **contexto de negócio** e **lista de artefato
 ## Contrato mental (o que não confundir)
 
 - **Gatilho**: deal **ganho** no Pipedrive, com `won_time` **posterior** ao instante em que `automacao_contrato.py` foi iniciado (corte em UTC no arranque do script).
-- **Estado local**: `deals_processados.txt` evita reprocessar o mesmo deal após envio bem-sucedido ao Clicksign.
+- **Estado**: MySQL `gebras_automacao` (`deals_processed`, `envelopes_pending`, etc.); CLI `scripts/automacao_db.py`.
 - **Modelo**: `contrato_padrao.docx` + **docxtpl**; placeholders devem bater com o dicionário montado em `fill_contract()`.
 - **CRM**: mapeamento de dados é por **hash de custom field** do Pipedrive no código — alterar campo no CRM sem atualizar o hash quebra o preenchimento.
 - **Assinatura**: signatários vêm de custom fields, em **ordem fixa** (Coordenador Principal → Contato Principal → Gestor Gebras → Diretor Principal). Grupos Clicksign = sequência 1, 2, 3…
-- **Sem e-mail de signatário**: contrato pode ser gerado em `contratos/` mas **não** vai ao Clicksign; o deal **não** entra em `deals_processados.txt` (permite nova tentativa após corrigir o CRM).
+- **Sem e-mail de signatário**: contrato pode ser gerado em `contratos/` mas **não** vai ao Clicksign; o deal **não** entra em `deals_processed` (permite nova tentativa após corrigir o CRM).
 
 ## Arquivos que costumam mudar juntos
 

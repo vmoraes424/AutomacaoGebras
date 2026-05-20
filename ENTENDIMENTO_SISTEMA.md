@@ -19,14 +19,14 @@ Arquivos gerados na pasta `contratos/` seguem o padrão `Contrato_{id_do_deal}_{
 | `automacao_contrato.py` | Loop principal: consulta deals ganhos, gera `.docx`, envia ao Clicksign. |
 | `contrato_padrao.docx` | Modelo Word com placeholders consumidos pela biblioteca **docxtpl** (sintaxe tipo Jinja2). |
 | `contratos/` | Saída dos contratos preenchidos antes do envio à assinatura. |
-| `deals_processados.txt` | Registro local dos IDs de deal já processados (evita reprocessar o mesmo ganho). |
+| MySQL `gebras_automacao` | Estado (deals processados, envelopes, pedidos Plune) e catálogo (filiais, subcentros). CLI: `scripts/automacao_db.py`. |
 | `criar_webhook.py` | Cria webhook na API v3 do Clicksign (eventos como assinatura e fechamento automático do envelope). |
 
 ## Fluxo resumido (`automacao_contrato.py`)
 
 1. **Início do script**: é gravada a data/hora UTC de arranque. Só entram deals **ganhos depois** desse instante (evita processar histórico antigo ao subir o processo).
 2. **Polling**: a cada intervalo configurável, chama a API do Pipedrive (`/api/v2/deals`, `status=won`).
-3. **Filtro**: ignora deals sem `won_time`, já listados em `deals_processados.txt`, ou com data de vitória anterior ao início do script.
+3. **Filtro**: ignora deals sem `won_time`, já em `deals_processed` (MySQL), ou com data de vitória anterior ao início do script.
 4. **Geração**: monta o contexto a partir dos **hashes dos custom fields** do Pipedrive (cada hash corresponde a um campo do formulário do deal), formata moeda e datas em padrão brasileiro, gera número de contrato e texto de unidades por extenso quando aplicável, e grava o `.docx` em `contratos/`.
 5. **Signatários**: lê e-mails dos custom fields em **ordem fixa** (Coordenador Principal → Contato Principal → Gestor Gebras → Diretor Principal). Envelope no Clicksign só é criado se houver pelo menos um signatário com e-mail **e** `DEV_PULAR_CLICKSIGN` estiver desligado; com `DEV_PULAR_CLICKSIGN=true`, o envio ao Clicksign é ignorado (não exige signatários para concluir o fluxo de geração do arquivo e registro do deal).
 6. **Clicksign (API v3)** *(omitido se `DEV_PULAR_CLICKSIGN=true` no `.env`)*: cria envelope, envia o documento em Base64, etc. Em **desenvolvimento**, ativar `DEV_PULAR_CLICKSIGN` evita chamadas à API (e rate limit): o `.docx` continua sendo gerado em `contratos/`; combine com `TESTE_PLUNE_SEM_ASSINATURA=true` para ainda criar o pedido no Plune.
@@ -37,7 +37,7 @@ Arquivos gerados na pasta `contratos/` seguem o padrão `Contrato_{id_do_deal}_{
 | Valor | Efeito |
 |-------|--------|
 | `false` (padrão) | Fluxo normal: envia o contrato ao Clicksign após gerar o Word. |
-| `true` | **Não** chama a API Clicksign (nenhum upload, envelope ou assinatura). O arquivo `contratos/Contrato_….docx` é gerado e o deal pode ser marcado em `deals_processados`; não há linha nova em `envelopes_pendentes.json` para esse fluxo. Para testar **Plune** sem Clicksign, use também `TESTE_PLUNE_SEM_ASSINATURA=true`. Em produção, mantenha `false`. |
+| `true` | **Não** chama a API Clicksign (nenhum upload, envelope ou assinatura). O arquivo `contratos/Contrato_….docx` é gerado e o deal pode ser marcado em `deals_processed` (MySQL); não há registro novo em `envelopes_pending` para esse fluxo. Para testar **Plune** sem Clicksign, use também `TESTE_PLUNE_SEM_ASSINATURA=true`. Em produção, mantenha `false`. |
 
 ## Script de webhook (`criar_webhook.py`)
 

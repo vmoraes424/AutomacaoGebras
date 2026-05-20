@@ -1,83 +1,24 @@
-import json
-import os
+"""
+Estado de envelopes e pedidos Plune — persistido em MySQL (core.database).
+
+Mantém API compatível com o restante do projeto.
+"""
+
 import re
-from datetime import datetime, timezone
 
-from .config import ARQUIVO_ENVELOPES_PENDENTES, ARQUIVO_PEDIDOS_PLUNE_CRIADOS
+from .database import (
+    buscar_por_deal_id,
+    buscar_por_envelope_id,
+    carregar_pedidos_plune_criados,
+    listar_aguardando_pedido_plune,
+    marcar_pedido_criado,
+    marcar_pedidos_aprovados,
+    salvar_envelope_pendente,
+    salvar_pedido_plune_key,
+)
 
-
-def _load_envelopes() -> list:
-    if not os.path.exists(ARQUIVO_ENVELOPES_PENDENTES):
-        return []
-    with open(ARQUIVO_ENVELOPES_PENDENTES, "r", encoding="utf-8") as f:
-        try:
-            data = json.load(f)
-            return data if isinstance(data, list) else []
-        except json.JSONDecodeError:
-            return []
-
-
-def _save_envelopes(records: list) -> None:
-    pasta_estado = os.path.dirname(ARQUIVO_ENVELOPES_PENDENTES)
-    if pasta_estado:
-        os.makedirs(pasta_estado, exist_ok=True)
-    with open(ARQUIVO_ENVELOPES_PENDENTES, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
-
-
-def salvar_envelope_pendente(deal_id: str, envelope_id: str, envelope_name: str) -> None:
-    records = _load_envelopes()
-    deal_id = str(deal_id)
-    records = [r for r in records if str(r.get("deal_id")) != deal_id]
-    records.append(
-        {
-            "deal_id": deal_id,
-            "envelope_id": envelope_id,
-            "envelope_name": envelope_name,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "pedido_plune_criado": False,
-            "pedidos_plune_criados": False,
-            "pedidos_plune_aprovados": False,
-        }
-    )
-    _save_envelopes(records)
-
-
-def buscar_por_envelope_id(envelope_id: str) -> dict | None:
-    for record in _load_envelopes():
-        if record.get("envelope_id") == envelope_id:
-            return record
-    return None
-
-
-def buscar_por_deal_id(deal_id: str) -> dict | None:
-    deal_id = str(deal_id)
-    for record in _load_envelopes():
-        if str(record.get("deal_id")) == deal_id:
-            return record
-    return None
-
-
-def marcar_pedido_criado(deal_id: str, pedido_id: str | None = None) -> None:
-    records = _load_envelopes()
-    deal_id = str(deal_id)
-    for record in records:
-        if str(record.get("deal_id")) == deal_id:
-            record["pedido_plune_criado"] = True
-            record["pedidos_plune_criados"] = True
-            if pedido_id is not None:
-                record["pedido_plune_id"] = str(pedido_id)
-    _save_envelopes(records)
-
-
-def marcar_pedidos_aprovados(deal_id: str) -> None:
-    records = _load_envelopes()
-    deal_id = str(deal_id)
-    for record in records:
-        if str(record.get("deal_id")) == deal_id:
-            record["pedidos_plune_aprovados"] = True
-            record["pedido_plune_aprovado"] = True
-    _save_envelopes(records)
+# Compat: nome antigo do parâmetro (chave PedidoIntegracao, não deal_id)
+salvar_pedido_plune_criado = salvar_pedido_plune_key
 
 
 def extrair_deal_id_do_nome_envelope(envelope_name: str) -> str | None:
@@ -87,31 +28,15 @@ def extrair_deal_id_do_nome_envelope(envelope_name: str) -> str | None:
     return match.group(1) if match else None
 
 
-def carregar_pedidos_plune_criados() -> set:
-    if not os.path.exists(ARQUIVO_PEDIDOS_PLUNE_CRIADOS):
-        return set()
-    with open(ARQUIVO_PEDIDOS_PLUNE_CRIADOS, "r", encoding="utf-8") as f:
-        return {line.strip() for line in f if line.strip()}
-
-
-def salvar_pedido_plune_criado(deal_id: str) -> None:
-    deal_id = str(deal_id)
-    criados = carregar_pedidos_plune_criados()
-    if deal_id in criados:
-        return
-    pasta_estado = os.path.dirname(ARQUIVO_PEDIDOS_PLUNE_CRIADOS)
-    if pasta_estado:
-        os.makedirs(pasta_estado, exist_ok=True)
-    with open(ARQUIVO_PEDIDOS_PLUNE_CRIADOS, "a", encoding="utf-8") as f:
-        f.write(f"{deal_id}\n")
-        f.flush()
-        os.fsync(f.fileno())
-
-
-def listar_aguardando_pedido_plune() -> list:
-    """Envelopes enviados ao Clicksign cujos pedidos Plune ainda não foram aprovados."""
-    return [
-        r
-        for r in _load_envelopes()
-        if not r.get("pedidos_plune_aprovados") and not r.get("pedido_plune_aprovado")
-    ]
+__all__ = [
+    "buscar_por_deal_id",
+    "buscar_por_envelope_id",
+    "carregar_pedidos_plune_criados",
+    "extrair_deal_id_do_nome_envelope",
+    "listar_aguardando_pedido_plune",
+    "marcar_pedido_criado",
+    "marcar_pedidos_aprovados",
+    "salvar_envelope_pendente",
+    "salvar_pedido_plune_criado",
+    "salvar_pedido_plune_key",
+]

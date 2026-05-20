@@ -15,9 +15,6 @@ from datetime import datetime, timezone
 from docxtpl import DocxTemplate
 
 from core.config import (
-    ARQUIVO_DEALS_PROCESSADOS,
-    ARQUIVO_ENVELOPES_PENDENTES,
-    ARQUIVO_PEDIDOS_PLUNE_CRIADOS,
     CLICKSIGN_ACCESS_TOKEN,
     CLICKSIGN_BASE_URL,
     CLICKSIGN_RATE_LIMIT_BUFFER_SEC,
@@ -27,8 +24,10 @@ from core.config import (
     MODELO_DOCX,
     PASTA_SAIDA,
     PIPEDRIVE_API_TOKEN,
+    DEV_PLUNE_APROVADO_NAO,
     TESTE_PLUNE_SEM_ASSINATURA,
 )
+from core.database import carregar_deals_processados, salvar_deal_processado
 from core.envelope_state import (
     carregar_pedidos_plune_criados,
     listar_aguardando_pedido_plune,
@@ -55,6 +54,8 @@ from core.pipedrive_fields import (
     FIELD_DOCUMENTO,
     FIELD_ENDERECO,
     FIELD_CIDADE,
+    FIELD_GESTAO_ACL,
+    FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_INDICADORES_QUALIDADE,
     FIELD_NOME_CLIENTE,
     FIELD_NUMERO_CONTRATO_P1,
@@ -99,39 +100,6 @@ def _parse_won_time_utc(won_time_str: str) -> datetime | None:
     return dt
 
 
-def carregar_deals_processados():
-    """
-    Retorna (eventos_processados, ids_formato_legado).
-
-    Linha «id|won_time» = esse ganho já gerou fluxo (won_time como veio na API).
-    Linha só com «id» = legado: bloqueia qualquer reprocessamento desse deal até remover.
-    """
-    if not os.path.exists(ARQUIVO_DEALS_PROCESSADOS):
-        return set(), set()
-    eventos: set[str] = set()
-    legado: set[str] = set()
-    with open(ARQUIVO_DEALS_PROCESSADOS, "r", encoding="utf-8-sig") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "|" in line:
-                eventos.add(line)
-            else:
-                legado.add(line)
-    return eventos, legado
-
-
-def salvar_deal_processado(deal_id, won_time_str: str):
-    deal_id = str(deal_id)
-    won_raw = str(won_time_str).strip()
-    pasta_estado = os.path.dirname(ARQUIVO_DEALS_PROCESSADOS)
-    if pasta_estado:
-        os.makedirs(pasta_estado, exist_ok=True)
-    with open(ARQUIVO_DEALS_PROCESSADOS, "a", encoding="utf-8") as f:
-        f.write(f"{deal_id}|{won_raw}\n")
-
-
 # ---------- FUNÇÕES AUXILIARES ----------
 def formatar_moeda(valor):
     try:
@@ -168,6 +136,28 @@ def numero_por_extenso_unidades(num):
 
 
 # ---------- CLICKSIGN CLIENT (V3) ----------
+
+
+def _parse_clicksign_datetime(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    texto = str(raw).strip()
+    if not texto:
+        return None
+    if texto.endswith("Z"):
+        texto = texto[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(texto)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(texto[:19], fmt)
+        except ValueError:
+            continue
+    return None
+
+
 class ClicksignClient:
     def __init__(self, base_url: str, access_token: str):
         self.base_url = base_url.rstrip("/")
@@ -360,13 +350,84 @@ class ClicksignClient:
         )
         self._raise(r, "notify_signer")
 
+    def get_envelope_attributes(self, envelope_id: str) -> dict:
+        r = self._request("GET", f"/envelopes/{envelope_id}", "get_envelope")
+        self._raise(r, "get_envelope")
+        return r.json().get("data", {}).get("attributes", {}) or {}
+
     def get_envelope_status(self, envelope_id: str) -> str | None:
+        try:
+            return self.get_envelope_attributes(envelope_id).get("status")
+        except RuntimeError:
+            return None
+
+    def get_ultima_assinatura_data_ptbr(self, envelope_id: str) -> str:
+        """
+        Data da última assinatura (dd/mm/aaaa) para Venda.Pedido.DataEntrega.
+        Usa o maior `modified` entre os signatários; fallback: `modified` do envelope fechado.
+        """
+        from core.pipedrive_fields import formatar_data_ptbr
+
+        attrs = self.get_envelope_attributes(envelope_id)
+        if attrs.get("status") != "closed":
+            return formatar_data_ptbr(None)
+
+        ultima: datetime | None = _parse_clicksign_datetime(attrs.get("modified"))
         r = self._request(
-            "GET", f"/envelopes/{envelope_id}", "get_envelope_status"
+            "GET", f"/envelopes/{envelope_id}/signers", "list_signers"
+        )
+        if r.ok:
+            signers = r.json().get("data") or []
+            if isinstance(signers, dict):
+                signers = [signers]
+            for signer in signers:
+                mod = _parse_clicksign_datetime(
+                    (signer.get("attributes") or {}).get("modified")
+                )
+                if mod and (ultima is None or mod > ultima):
+                    ultima = mod
+
+        if ultima:
+            return ultima.strftime("%d/%m/%Y")
+        return formatar_data_ptbr(attrs.get("modified"))
+
+    def baixar_pdf_assinado(self, envelope_id: str) -> tuple[bytes, str] | None:
+        """Baixa o PDF assinado do primeiro documento do envelope (status closed)."""
+        r = self._request(
+            "GET", f"/envelopes/{envelope_id}/documents", "list_documents"
         )
         if not r.ok:
             return None
-        return r.json().get("data", {}).get("attributes", {}).get("status")
+        documentos = r.json().get("data") or []
+        if isinstance(documentos, dict):
+            documentos = [documentos]
+        for documento in documentos:
+            doc_id = documento.get("id")
+            if not doc_id:
+                continue
+            r_doc = self._request(
+                "GET",
+                f"/envelopes/{envelope_id}/documents/{doc_id}",
+                "get_document",
+            )
+            if not r_doc.ok:
+                continue
+            attrs = r_doc.json().get("data", {}).get("attributes", {}) or {}
+            downloads = attrs.get("downloads") or {}
+            url = downloads.get("signed_file_url") or downloads.get("signed_file")
+            if not url:
+                continue
+            if str(url).startswith("/"):
+                base = self.base_url.split("/api")[0]
+                url = f"{base.rstrip('/')}{url}"
+            nome = str(attrs.get("filename") or "contrato_assinado.pdf")
+            if not nome.lower().endswith(".pdf"):
+                nome = f"{Path(nome).stem}.pdf"
+            resp = requests.get(url, timeout=180)
+            if not resp.ok:
+                continue
+            return resp.content, nome
+        return None
 
 
 # ---------- FLUXO RÁPIDO (FIRE & FORGET COM GRUPOS) ----------
@@ -423,6 +484,7 @@ def fill_contract(deal_data):
     p1 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
     p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2)
     qtd_sole = get_val(deal_data, FIELD_QTD_SOLE)
+    sole_consultoria = get_val(deal_data, FIELD_QUALIDADE_ENERGIA)
 
     raw_dt_implantacao = get_val(deal_data, FIELD_DATA_IMPLANTACAO)
     dt_implantacao = (
@@ -463,6 +525,7 @@ def fill_contract(deal_data):
         "cidade": cidade,
         "documento": documento,
         "sole_web": numero_por_extenso_unidades(qtd_sole),
+        "sole_consultoria": sole_consultoria,
         "valor_mensal": formatar_moeda(get_val(deal_data, FIELD_VALOR_MENSAL)),
         "valor_implantacao": formatar_moeda(
             get_val(deal_data, FIELD_VALOR_IMPLANTACAO)
@@ -471,8 +534,11 @@ def fill_contract(deal_data):
         "data_inicio": formatar_data_ptbr(
             deal_data.get("won_time") or deal_data.get("add_time")
         ),
+        # Pipedrive: ffb2d5a = "Gestão da Qualidade de Energia"; c0a23912 = "Sole Consultoria"
         "indicadores_qualidade": get_val(deal_data, FIELD_INDICADORES_QUALIDADE),
-        "qualidade_energia": get_val(deal_data, FIELD_QUALIDADE_ENERGIA),
+        "qualidade_energia": get_val(deal_data, FIELD_INDICADORES_QUALIDADE),
+        "gestao_acl": get_val(deal_data, FIELD_GESTAO_ACL),
+        "gestao_usina_fotovoltaica": get_val(deal_data, FIELD_GESTAO_USINA_FOTOVOLTAICA),
         "data_pagamento_implantacao": dt_implantacao,
         "data_pagamento_primeira_cobranca": dt_primeira_cobranca,
         "contato_gestor": get_val(deal_data, FIELD_CONTATO_GESTOR),
@@ -514,13 +580,13 @@ def log_resultado_plune(deal_id: str, result: dict) -> None:
         if status == "created":
             print(
                 f"[v] Plune: pedido criado — id={result.get('pedido_id')} "
-                f"(deal {deal_id} salvo em {ARQUIVO_PEDIDOS_PLUNE_CRIADOS}).",
+                f"(deal {deal_id} registrado no MySQL).",
                 flush=True,
             )
         elif status == "skipped":
             print(
                 f"[*] Plune: ignorado para deal {deal_id} — {result} "
-                f"(já consta em {ARQUIVO_PEDIDOS_PLUNE_CRIADOS} ou já existe pedido com PedidoIntegracao).",
+                f"(já consta no MySQL ou já existe pedido com PedidoIntegracao).",
                 flush=True,
             )
         else:
@@ -555,6 +621,19 @@ def criar_pedidos_plune_no_ganho(deal_id: str, contexto_envio: str) -> None:
     try:
         result = criar_pedido_plune(deal_id)
         log_resultado_plune(deal_id, result)
+    except DealValidationError as validation_error:
+        print(
+            f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
+            flush=True,
+        )
+        for erro in validation_error.mensagens:
+            print(f"    - {erro}", flush=True)
+        reabrir_deal_com_erros(deal_id, validation_error.mensagens)
+        print(
+            f"[*] Se o deal {deal_id} já estava em deals_processados, remova o estado com "
+            f"`python scripts/automacao_db.py rm deal {deal_id} -y` antes de ganhar de novo.",
+            flush=True,
+        )
     except PluneError as exc:
         print(
             f"[!] Plune: FALHA ao criar/garantir pedidos para deal {deal_id}: {exc}",
@@ -591,7 +670,7 @@ def processar_deals_pendentes():
                 _deals_legado_ja_avisados.add(deal_id)
                 print(
                     f"[*] Deal {deal_id} («{deal.get('title')}») ignorado: está em "
-                    f"{ARQUIVO_DEALS_PROCESSADOS} só com o id (formato antigo). "
+                    f"deals_processados (MySQL) só com o id (formato antigo). "
                     f"Remova a linha «{deal_id}» para permitir novo ganho ou use linhas «id|won_time».",
                     flush=True,
                 )
@@ -633,7 +712,7 @@ def processar_deals_pendentes():
                 reabrir_deal_com_erros(deal_id, validation_error.mensagens)
                 algum_processado = True
                 print(
-                    f"[v] Deal {deal_id} reaberto no Pipedrive. Não foi gravado em {ARQUIVO_DEALS_PROCESSADOS}; "
+                    f"[v] Deal {deal_id} reaberto no Pipedrive. Não foi gravado no MySQL (deals_processed); "
                     "após corrigir os campos e ganhar novamente, ele será processado.",
                     flush=True,
                 )
@@ -678,7 +757,7 @@ def processar_deals_pendentes():
                     salvar_deal_processado(deal_id, won_time_str)
                     algum_processado = True
                     print(
-                        f"[v] Contrato enviado ao Clicksign. Deal {deal_id} registrado em {ARQUIVO_DEALS_PROCESSADOS}.",
+                        f"[v] Contrato enviado ao Clicksign. Deal {deal_id} registrado no MySQL.",
                         flush=True,
                     )
 
@@ -688,7 +767,7 @@ def processar_deals_pendentes():
                     if not TESTE_PLUNE_SEM_ASSINATURA:
                         print(
                             f"[*] Pós-assinatura: quando o envelope fechar, os pedidos Plune serão aprovados. "
-                            f"Pendências em: {ARQUIVO_ENVELOPES_PENDENTES}",
+                            f"Pendências de envelope no MySQL (envelopes_pending).",
                             flush=True,
                         )
                 else:
@@ -727,8 +806,7 @@ def processar_contratos_assinados():
     if not pendentes:
         print(
             f"[*] Plune (pós-assinatura): nenhum envelope aguardando pedido; "
-            f"pedidos criados localmente: {len(carregar_pedidos_plune_criados())} "
-            f"({ARQUIVO_PEDIDOS_PLUNE_CRIADOS}).",
+            f"pedidos criados localmente: {len(carregar_pedidos_plune_criados())} (MySQL).",
             flush=True,
         )
         return
@@ -752,12 +830,14 @@ def processar_contratos_assinados():
             )
             continue
 
+        data_entrega = cs.get_ultima_assinatura_data_ptbr(envelope_id)
         print(
-            f"\n[!] Contrato assinado! Deal {deal_id} → aprovando pedidos no Plune…",
+            f"\n[!] Contrato assinado! Deal {deal_id} → aprovando pedidos no Plune "
+            f"(Data de entrega: {data_entrega})…",
             flush=True,
         )
         try:
-            result = aprovar_pedidos_plune(deal_id)
+            result = aprovar_pedidos_plune(deal_id, data_entrega=data_entrega)
             log_resultado_plune(deal_id, result)
             if result.get("status") in ("approved", "skipped"):
                 marcar_pedidos_aprovados(deal_id)
@@ -776,9 +856,11 @@ def main():
     print(
         f"[*] Script iniciado em: {DATA_INICIO_SCRIPT.strftime('%d/%m/%Y %H:%M:%S')} UTC"
     )
+    from core.config import MYSQL_DATABASE, MYSQL_HOST
+
     print(
-        f"[*] Arquivos de estado: deals → {ARQUIVO_DEALS_PROCESSADOS} (formato «id|won_time» por vitória); "
-        f"pedidos Plune → {ARQUIVO_PEDIDOS_PLUNE_CRIADOS}."
+        f"[*] Estado persistido em MySQL: {MYSQL_HOST}/{MYSQL_DATABASE} "
+        f"(deals, pedidos Plune, envelopes; legado txt/json migrado na 1ª execução)."
     )
     print(
         f"[*] Corte temporal: só deals com won_time **depois** de {DATA_INICIO_SCRIPT.strftime('%d/%m/%Y %H:%M:%S')} UTC."
@@ -786,6 +868,10 @@ def main():
     if TESTE_PLUNE_SEM_ASSINATURA:
         print(
             "[*] MODO TESTE: pedido Plune logo após Clicksign (processar_contratos_assinados fica em silêncio de propósito)."
+        )
+    if DEV_PLUNE_APROVADO_NAO:
+        print(
+            "[*] DEV_PLUNE_APROVADO_NAO=1 — pedidos Plune criados com Aprovado=Não; aprovação pós-assinatura desligada."
         )
     if DEV_PULAR_CLICKSIGN:
         print(

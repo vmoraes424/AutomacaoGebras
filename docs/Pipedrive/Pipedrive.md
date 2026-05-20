@@ -1094,7 +1094,7 @@ Arquivos relevantes:
 | `core/pipedrive_fields.py` | Hashes dos custom fields e helpers para extrair dados do deal. |
 | `core/envelope_state.py` | Estado local de envelope/deal/pedido Plune. |
 | `core/plune_pedido.py` | Criação de pedido Plune a partir de deal Pipedrive. |
-| `runtime/state/deals_processados.txt` | Idempotência dos deals já processados. |
+| MySQL `gebras_automacao.deals_processed` | Idempotência dos deals já processados. |
 
 Fluxo atual:
 
@@ -1129,7 +1129,7 @@ Definidos em `core/pipedrive_fields.py`.
 | Cidade | `2bf3850e0a6dc7232f5f44197e79ffcc5642c1c5` |
 | Documento CPF/CNPJ | `176d2a0d5167d1edc9b949c75f8b9a7597eabe91` |
 | Quantidade Sole | `f9923cdce1274da8c10cec1b9ab561e024504620` |
-| Valor mensal | `c5dfc907c53bb12ca916f9d0d20df23e3847e54d` |
+| Valor Recorrência (valor mensal) | `2a331c4b62c9d46aae9451af25eca2d08a3fdf0a` |
 | Valor implantação | `015407d5106c321a227f1ca881f920fe2e1042ec` |
 | Data implantação | `2b8f62a107891e26390459cfa4048b3eedade11b` |
 | Data primeira cobrança | `f5f69ea52e5f65b37c9672fdb4dcfb3b6a4cdbb2` |

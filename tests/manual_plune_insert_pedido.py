@@ -1,7 +1,7 @@
 """
 Teste: criar pedido Plune a partir de um deal_id Pipedrive.
 
-  python tests/test_plune_insert_pedido.py <deal_id>
+  python tests/manual_plune_insert_pedido.py <deal_id>
 """
 
 import sys
@@ -11,7 +11,7 @@ from core.plune_pedido import PluneError, criar_pedido_plune
 
 def main():
     if len(sys.argv) < 2:
-        print("Uso: python tests/test_plune_insert_pedido.py <deal_id>")
+        print("Uso: python tests/manual_plune_insert_pedido.py <deal_id>")
         sys.exit(1)
     try:
         print(criar_pedido_plune(sys.argv[1]))

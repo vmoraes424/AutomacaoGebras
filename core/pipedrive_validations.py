@@ -2,13 +2,20 @@ import re
 
 import requests
 
-from .config import (
-    PIPEDRIVE_API_TOKEN,
-    PLUNE_CENTRO_CUSTO_ID,
-    PLUNE_REGIONAL_SUBCENTRO2_MAP,
-    PLUNE_SUBCENTRO_CUSTO_ID,
+from .config import PIPEDRIVE_API_TOKEN, PLUNE_CENTRO_CUSTO_ID
+from .database import default_branch_id, filial_tem_mapeamento
+from .pipedrive_fields import (
+    FIELD_DOCUMENTO,
+    FIELD_REGIONAL,
+    FIELD_SUBCENTRO_NIVEL_3,
+    FIELD_VALOR_MENSAL,
+    get_filial_chaves,
+    get_filial_label,
+    get_val,
+    resolver_branch_id,
+    settings_por_branch,
 )
-from .pipedrive_fields import FIELD_DOCUMENTO, FIELD_REGIONAL, FIELD_VALOR_MENSAL, get_val
+from .plune_catalog import resolver_subcentro, sincronizar_subcentros_de_pedidos
 
 
 class DealValidationError(RuntimeError):
@@ -53,7 +60,7 @@ def validar_deal_para_automacao(deal: dict) -> None:
     valor_mensal = get_val(deal, FIELD_VALOR_MENSAL)
     if not _valor_numero_maior_que_um(valor_mensal):
         erros.append(
-            "Campo obrigatório inválido: Serviço / Valor (valor mensal). "
+            "Campo obrigatório inválido: Valor Recorrência (valor mensal). "
             f"Informe um número maior que 1. Valor recebido: {valor_mensal!r}."
         )
 
@@ -64,28 +71,82 @@ def validar_deal_para_automacao(deal: dict) -> None:
             f"Informe um documento com 11 ou 14 dígitos. Valor recebido: {documento!r}."
         )
 
+    label_filial, id_filial = get_filial_chaves(deal)
+    if not label_filial and not id_filial:
+        erros.append(
+            "Campo obrigatório inválido: Filial. "
+            "Selecione a filial no deal (Matriz ou Iribarrem San Martin)."
+        )
+    elif not filial_tem_mapeamento(label_filial, id_filial) and not default_branch_id():
+        erros.append(
+            "Filial sem mapeamento para BranchId no Plune e default_branch_id vazio. "
+            f"Valor no Pipedrive: {get_filial_label(deal) or id_filial!r}. "
+            "Cadastre em pipedrive_filial (MySQL) ou app_meta.default_branch_id."
+        )
+    else:
+        try:
+            branch_id = resolver_branch_id(deal)
+        except ValueError as exc:
+            erros.append(str(exc))
+            branch_id = ""
+        if branch_id:
+            branch_cfg = settings_por_branch(branch_id)
+            if not branch_cfg["subcentro_custo_id"]:
+                erros.append(
+                    f"Configuração Plune ausente para filial BranchId={branch_id}: "
+                    "subcentro_custo_id (Sub Centro = Gestão de Energia)."
+                )
+
     regional = get_val(deal, FIELD_REGIONAL).strip()
+    branch_id = ""
+    if label_filial or id_filial or default_branch_id():
+        try:
+            branch_id = resolver_branch_id(deal)
+        except ValueError:
+            branch_id = ""
+    branch_settings = settings_por_branch(branch_id) if branch_id else {}
     if not PLUNE_CENTRO_CUSTO_ID:
         erros.append(
             "Configuração Plune ausente: PLUNE_CENTRO_CUSTO_ID (Centro = Contratos Comerciais)."
         )
-    if not PLUNE_SUBCENTRO_CUSTO_ID:
-        erros.append(
-            "Configuração Plune ausente: PLUNE_SUBCENTRO_CUSTO_ID "
-            "(Sub Centro = Gestão de Energia)."
-        )
     if not regional:
         erros.append(
-            "Campo obrigatório inválido: REGIONAL. Informe a regional para preencher "
+            "Campo obrigatório inválido: Sub Centro Nível 2 (regional). Informe o valor para preencher "
             "o Sub Centro Nível 2 no Plune."
         )
-    elif regional not in PLUNE_REGIONAL_SUBCENTRO2_MAP:
-        disponiveis = ", ".join(sorted(PLUNE_REGIONAL_SUBCENTRO2_MAP)) or "nenhum"
+    elif branch_id:
+        sub2_id = resolver_subcentro(branch_id, 2, regional)
+        if not sub2_id:
+            sincronizar_subcentros_de_pedidos(force=True)
+            sub2_id = resolver_subcentro(branch_id, 2, regional, sync_if_missing=False)
+        if not sub2_id:
+            regional_map = branch_settings.get("regional_map", {})
+            disponiveis = ", ".join(sorted(regional_map)) or "nenhum (rode sync Plune)"
+            erros.append(
+                "Sub Centro Nível 2 sem mapeamento para SubCentroCusto2Id no Plune. "
+                f"Valor recebido: {regional!r}. O catálogo é atualizado via API; "
+                f"valores conhecidos na filial: {disponiveis}."
+            )
+
+    subcentro3 = get_val(deal, FIELD_SUBCENTRO_NIVEL_3).strip()
+    if not subcentro3:
         erros.append(
-            "REGIONAL sem mapeamento para SubCentroCusto2Id no Plune. "
-            f"Valor recebido: {regional!r}. Configure PLUNE_REGIONAL_SUBCENTRO2_MAP. "
-            f"Mapeados hoje: {disponiveis}."
+            "Campo obrigatório inválido: Sub Centro Nível 3. "
+            "Informe o valor para preencher SubCentroCusto3Id no Plune."
         )
+    elif branch_id:
+        sub3_id = resolver_subcentro(branch_id, 3, subcentro3)
+        if not sub3_id:
+            sincronizar_subcentros_de_pedidos(force=True)
+            sub3_id = resolver_subcentro(branch_id, 3, subcentro3, sync_if_missing=False)
+        if not sub3_id:
+            subcentro3_map = branch_settings.get("subcentro3_map", {})
+            disponiveis = ", ".join(sorted(subcentro3_map)) or "nenhum (rode sync Plune)"
+            erros.append(
+                "Sub Centro Nível 3 sem mapeamento para SubCentroCusto3Id no Plune. "
+                f"Valor recebido: {subcentro3!r}. O catálogo é atualizado via API; "
+                f"valores conhecidos na filial: {disponiveis}."
+            )
 
     if erros:
         raise DealValidationError(deal_id, erros)

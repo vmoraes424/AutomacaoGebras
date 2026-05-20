@@ -26,7 +26,7 @@ def _session_context() -> str:
         "Resumo: deal **ganho** no Pipedrive (apos o arranque do script, em UTC) -> "
         "`automacao_contrato.py` faz polling -> preenche `contrato_padrao.docx` com **docxtpl** "
         "-> grava em `contratos/` -> **Clicksign API v3** (grupos sequenciais). "
-        "Estado: `deals_processados.txt`. "
+        "Estado: MySQL `gebras_automacao` (CLI automacao_db). "
         "`criar_webhook.py` so **regista** webhook; nao processa callbacks aqui. "
         "Mapeamentos CRM usam **hashes** de custom fields no codigo."
     )
