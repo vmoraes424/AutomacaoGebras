@@ -19,6 +19,8 @@ from .config import (
     MYSQL_PASSWORD,
     MYSQL_PORT,
     MYSQL_USER,
+    PLUNE_PEDIDO_MODELO_ID,
+    PLUNE_PEDIDO_SERIE,
 )
 
 # Seed único na 1ª criação do banco (não duplicar em gebras_defaults.py)
@@ -34,17 +36,21 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
         "subcentro_custo_id": "447",
         "parametro_contabil_recorrente": "1077",
         "parametro_contabil_implantacao": "1440",
+        "pedido_serie": "1",
+        "pedido_modelo_id": "01",
     },
     "790": {
         "label": "Iribarrem San Martin (ISM)",
         "subcentro_custo_id": "449",
         "parametro_contabil_recorrente": "1102",
         "parametro_contabil_implantacao": "1436",
+        "pedido_serie": "0",
+        "pedido_modelo_id": "01",
     },
 }
 _SEED_DEFAULT_BRANCH_ID = "790"
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 5
 _initialized = False
 
 
@@ -177,7 +183,9 @@ def _init_schema(conn: DbConnection) -> None:
             label VARCHAR(255) NOT NULL,
             subcentro_custo_id VARCHAR(32) NOT NULL,
             parametro_contabil_recorrente VARCHAR(32) NOT NULL,
-            parametro_contabil_implantacao VARCHAR(32) NOT NULL
+            parametro_contabil_implantacao VARCHAR(32) NOT NULL,
+            pedido_serie VARCHAR(8) NOT NULL DEFAULT '0',
+            pedido_modelo_id VARCHAR(8) NOT NULL DEFAULT '01'
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -208,6 +216,83 @@ def _init_schema(conn: DbConnection) -> None:
         "INSERT IGNORE INTO app_meta (`key`, value) VALUES (%s, %s)",
         ("schema_version", str(_SCHEMA_VERSION)),
     )
+    _migrate_schema(conn)
+
+
+def _migrate_schema(conn: DbConnection) -> None:
+    row = conn.execute(
+        "SELECT value FROM app_meta WHERE `key` = 'schema_version'"
+    ).fetchone()
+    try:
+        version = int(row["value"]) if row else 0
+    except (TypeError, ValueError):
+        version = 0
+    if version >= _SCHEMA_VERSION:
+        return
+    if version < 3:
+        try:
+            conn.execute(
+                """
+                ALTER TABLE branch_config
+                ADD COLUMN pedido_serie VARCHAR(8) NOT NULL DEFAULT '0'
+                """
+            )
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
+        conn.execute(
+            "UPDATE branch_config SET pedido_serie = %s WHERE pedido_serie IS NULL OR pedido_serie = ''",
+            (PLUNE_PEDIDO_SERIE,),
+        )
+    if version < 4:
+        try:
+            conn.execute(
+                """
+                ALTER TABLE branch_config
+                ADD COLUMN pedido_modelo_id VARCHAR(8) NOT NULL DEFAULT '01'
+                """
+            )
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
+        conn.execute(
+            "UPDATE branch_config SET pedido_modelo_id = %s WHERE branch_id = %s",
+            ("**", "751"),
+        )
+        conn.execute(
+            "UPDATE branch_config SET pedido_modelo_id = %s WHERE branch_id = %s",
+            ("01", "790"),
+        )
+        conn.execute(
+            """
+            UPDATE branch_config
+            SET pedido_modelo_id = %s
+            WHERE pedido_modelo_id IS NULL OR pedido_modelo_id = ''
+            """,
+            (PLUNE_PEDIDO_MODELO_ID,),
+        )
+    if version < 5:
+        # Alinha com pedidos manuais de referência (6754 Matriz, 6764 ISM) e Venda.NotaConfig
+        conn.execute(
+            """
+            UPDATE branch_config
+            SET pedido_serie = %s, pedido_modelo_id = %s
+            WHERE branch_id = %s
+            """,
+            ("1", "01", "751"),
+        )
+        conn.execute(
+            """
+            UPDATE branch_config
+            SET pedido_serie = %s, pedido_modelo_id = %s
+            WHERE branch_id = %s
+            """,
+            ("0", "01", "790"),
+        )
+    conn.execute(
+        "UPDATE app_meta SET value = %s WHERE `key` = 'schema_version'",
+        (str(_SCHEMA_VERSION),),
+    )
 
 
 def _seed_catalogo_inicial(conn: DbConnection) -> None:
@@ -227,8 +312,9 @@ def _seed_catalogo_inicial(conn: DbConnection) -> None:
                 """
                 INSERT INTO branch_config (
                     branch_id, label, subcentro_custo_id,
-                    parametro_contabil_recorrente, parametro_contabil_implantacao
-                ) VALUES (%s, %s, %s, %s, %s)
+                    parametro_contabil_recorrente, parametro_contabil_implantacao,
+                    pedido_serie, pedido_modelo_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     str(branch_id),
@@ -236,6 +322,8 @@ def _seed_catalogo_inicial(conn: DbConnection) -> None:
                     cfg["subcentro_custo_id"],
                     cfg["parametro_contabil_recorrente"],
                     cfg["parametro_contabil_implantacao"],
+                    cfg.get("pedido_serie", PLUNE_PEDIDO_SERIE),
+                    cfg.get("pedido_modelo_id", PLUNE_PEDIDO_MODELO_ID),
                 ),
             )
 
@@ -308,19 +396,28 @@ def upsert_branch_config(
     subcentro_custo_id: str,
     parametro_recorrente: str,
     parametro_implantacao: str,
+    pedido_serie: str | None = None,
+    pedido_modelo_id: str | None = None,
 ) -> None:
+    serie = str(pedido_serie if pedido_serie is not None else PLUNE_PEDIDO_SERIE)
+    modelo = str(
+        pedido_modelo_id if pedido_modelo_id is not None else PLUNE_PEDIDO_MODELO_ID
+    )
     with db_conn() as conn:
         conn.execute(
             """
             INSERT INTO branch_config (
                 branch_id, label, subcentro_custo_id,
-                parametro_contabil_recorrente, parametro_contabil_implantacao
-            ) VALUES (%s, %s, %s, %s, %s)
+                parametro_contabil_recorrente, parametro_contabil_implantacao,
+                pedido_serie, pedido_modelo_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 label = VALUES(label),
                 subcentro_custo_id = VALUES(subcentro_custo_id),
                 parametro_contabil_recorrente = VALUES(parametro_contabil_recorrente),
-                parametro_contabil_implantacao = VALUES(parametro_contabil_implantacao)
+                parametro_contabil_implantacao = VALUES(parametro_contabil_implantacao),
+                pedido_serie = VALUES(pedido_serie),
+                pedido_modelo_id = VALUES(pedido_modelo_id)
             """,
             (
                 str(branch_id),
@@ -328,6 +425,8 @@ def upsert_branch_config(
                 subcentro_custo_id,
                 parametro_recorrente,
                 parametro_implantacao,
+                serie,
+                modelo,
             ),
         )
 
@@ -580,10 +679,14 @@ def branch_config(branch_id: str) -> dict | None:
     if not row:
         return None
     maps = maps_por_branch(branch_id)
+    serie = row.get("pedido_serie") or PLUNE_PEDIDO_SERIE
+    modelo = row.get("pedido_modelo_id") or PLUNE_PEDIDO_MODELO_ID
     return {
         "subcentro_custo_id": row["subcentro_custo_id"],
         "parametro_recorrente": row["parametro_contabil_recorrente"],
         "parametro_implantacao": row["parametro_contabil_implantacao"],
+        "pedido_serie": str(serie),
+        "pedido_modelo_id": str(modelo),
         "regional_map": maps["regional_map"],
         "subcentro3_map": maps["subcentro3_map"],
     }

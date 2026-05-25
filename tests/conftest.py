@@ -27,7 +27,12 @@ _FAKE_FILIAL = {
 
 
 def _fake_branch_config(branch_id: str) -> dict:
-    return {**_FAKE_FILIAL, "branch_id": branch_id}
+    faturamento = (
+        {"pedido_serie": "1", "pedido_modelo_id": "01"}
+        if str(branch_id) == "751"
+        else {"pedido_serie": "0", "pedido_modelo_id": "01"}
+    )
+    return {**_FAKE_FILIAL, **faturamento, "branch_id": branch_id}
 
 
 _DB_PATCHES = [

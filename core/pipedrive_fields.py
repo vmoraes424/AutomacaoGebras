@@ -1,5 +1,6 @@
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -99,10 +100,14 @@ def settings_por_branch(branch_id: str) -> dict:
     cfg = branch_config(str(branch_id))
     if cfg:
         return cfg
+    from .config import PLUNE_PEDIDO_MODELO_ID, PLUNE_PEDIDO_SERIE
+
     return {
         "subcentro_custo_id": "",
         "parametro_recorrente": "",
         "parametro_implantacao": "",
+        "pedido_serie": PLUNE_PEDIDO_SERIE,
+        "pedido_modelo_id": PLUNE_PEDIDO_MODELO_ID,
         "regional_map": {},
         "subcentro3_map": {},
     }
@@ -137,6 +142,18 @@ def normalizar_nome(nome: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 
+TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
+
+
+def formatar_data_hora_brasilia(dt: datetime | None) -> str:
+    """Data/hora em Brasília (America/Sao_Paulo) para logs e mensagens ao usuário."""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ_BRASILIA).strftime("%d/%m/%Y %H:%M:%S")
+
+
 def formatar_data_ptbr(data_iso) -> str:
     if not data_iso:
         return datetime.now().strftime("%d/%m/%Y")
@@ -146,6 +163,21 @@ def formatar_data_ptbr(data_iso) -> str:
         return data_obj.strftime("%d/%m/%Y")
     except ValueError:
         return str(data_iso)
+
+
+def formatar_quantidade_uc(valor) -> str:
+    """Quantidade de UCs no contrato Word: apenas número, sem por extenso."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+    try:
+        normalizado = texto.replace("R$", "").replace(" ", "")
+        num = float(normalizado.replace(".", "").replace(",", "."))
+        if num == int(num):
+            return str(int(num))
+        return str(num).replace(".", ",")
+    except (ValueError, TypeError):
+        return texto
 
 
 def formatar_decimal_plune(valor) -> str:

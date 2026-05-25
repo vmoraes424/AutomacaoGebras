@@ -11,7 +11,7 @@ import os
 import traceback
 import requests
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from docxtpl import DocxTemplate
 
 from core.config import (
@@ -24,6 +24,7 @@ from core.config import (
     MODELO_DOCX,
     PASTA_SAIDA,
     PIPEDRIVE_API_TOKEN,
+    CORTE_TEMPORAL_GRACE_MINUTOS,
     DEV_PLUNE_APROVADO_NAO,
     TESTE_PLUNE_SEM_ASSINATURA,
 )
@@ -36,9 +37,13 @@ from core.envelope_state import (
 )
 from core.plune_pedido import (
     PluneError,
+    anexar_contrato_local_aos_pedidos_deal,
     aprovar_pedidos_plune,
     buscar_parceiro_plune_por_documento,
     criar_pedido_plune,
+    extrair_numeros_pedidos_plune,
+    formatar_linha_pedidos_plune_contrato,
+    obter_numeros_pedidos_plune_deal,
 )
 from core.pipedrive_validations import (
     DealValidationError,
@@ -65,18 +70,28 @@ from core.pipedrive_fields import (
     FIELD_VALOR_IMPLANTACAO,
     FIELD_VALOR_MENSAL,
     extrair_signatarios,
+    formatar_data_hora_brasilia,
     formatar_data_ptbr,
+    formatar_quantidade_uc,
     get_val,
 )
 
 # --- CONFIGURAÇÕES (ver config.py) ---
 API_TOKEN = PIPEDRIVE_API_TOKEN
 
-# Define a data/hora de início do script em UTC para comparar com o won_time do Pipedrive
-DATA_INICIO_SCRIPT = datetime.now(timezone.utc)
+# Limite de won_time (UTC): definido em main() com margem CORTE_TEMPORAL_GRACE_MINUTOS
+DATA_INICIO_SCRIPT: datetime | None = None
 
 # Evita repetir o mesmo aviso sobre linha legada em deals_processados a cada ciclo
 _deals_legado_ja_avisados: set[str] = set()
+
+
+def inicializar_corte_temporal() -> datetime:
+    """UTC: won_time do deal deve ser >= este instante (com margem antes do arranque)."""
+    global DATA_INICIO_SCRIPT
+    agora = datetime.now(timezone.utc)
+    DATA_INICIO_SCRIPT = agora - timedelta(minutes=CORTE_TEMPORAL_GRACE_MINUTOS)
+    return DATA_INICIO_SCRIPT
 
 
 # ---------- GERENCIAMENTO DE ESTADO ----------
@@ -107,32 +122,6 @@ def formatar_moeda(valor):
         return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except (ValueError, TypeError):
         return str(valor)
-
-
-def numero_por_extenso_unidades(num):
-    try:
-        n = int(num)
-    except:
-        return str(num)
-    extenso = {
-        1: "uma",
-        2: "duas",
-        3: "três",
-        4: "quatro",
-        5: "cinco",
-        6: "seis",
-        7: "sete",
-        8: "oito",
-        9: "nove",
-        10: "dez",
-        11: "onze",
-        12: "doze",
-        13: "treze",
-        14: "quatorze",
-        15: "quinze",
-    }
-    texto = extenso.get(n, str(n))
-    return f"{n} ({texto}) {'unidade' if n==1 else 'unidades'}"
 
 
 # ---------- CLICKSIGN CLIENT (V3) ----------
@@ -471,7 +460,7 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: 
 
 
 # ---------- GERAÇÃO DO CONTRATO ----------
-def fill_contract(deal_data):
+def fill_contract(deal_data, *, numeros_pedidos: dict[str, str] | None = None):
     if not os.path.exists(MODELO_DOCX):
         print(f"[!] Erro: Modelo '{MODELO_DOCX}' não encontrado.")
         return None
@@ -518,14 +507,27 @@ def fill_contract(deal_data):
         cidade = get_val(deal_data, FIELD_CIDADE)
         documento = documento_pipe
 
+    if numeros_pedidos is None:
+        deal_id = str(deal_data.get("id", "")).strip()
+        numeros_pedidos = {}
+        if deal_id:
+            try:
+                numeros_pedidos = obter_numeros_pedidos_plune_deal(deal_id)
+            except PluneError as exc:
+                print(
+                    f"[!] Aviso: não foi possível buscar pedidos Plune para o contrato "
+                    f"(deal {deal_id}): {exc}",
+                )
+
     contexto = {
         "numero_contrato": f"CGRc{p1}i{p2}n1r0a26",
+        "numeros_pedidos": formatar_linha_pedidos_plune_contrato(numeros_pedidos),
         "nome_cliente": nome_cliente,
         "endereco": endereco,
         "cidade": cidade,
         "documento": documento,
-        "sole_web": numero_por_extenso_unidades(qtd_sole),
-        "sole_consultoria": sole_consultoria,
+        "sole_web": formatar_quantidade_uc(qtd_sole),
+        "sole_consultoria": formatar_quantidade_uc(sole_consultoria),
         "valor_mensal": formatar_moeda(get_val(deal_data, FIELD_VALOR_MENSAL)),
         "valor_implantacao": formatar_moeda(
             get_val(deal_data, FIELD_VALOR_IMPLANTACAO)
@@ -653,7 +655,7 @@ def processar_deals_pendentes():
 
     eventos_ok, ids_legado = carregar_deals_processados()
     n_won = len(deals)
-    n_sem_won = n_legado = n_dup = n_data = n_corte = 0
+    n_sem_won = n_legado = n_dup = n_data = 0
     algum_processado = False
 
     for deal in deals:
@@ -690,8 +692,7 @@ def processar_deals_pendentes():
             )
             continue
 
-        if won_time_dt < DATA_INICIO_SCRIPT:
-            n_corte += 1
+        if DATA_INICIO_SCRIPT is not None and won_time_dt < DATA_INICIO_SCRIPT:
             continue
 
         print(
@@ -718,17 +719,42 @@ def processar_deals_pendentes():
                 )
                 continue
 
+            print(
+                f"    -> Criando pedidos no Plune (antes do contrato)...",
+                flush=True,
+            )
+            numeros_pedidos: dict[str, str] = {}
+            try:
+                result_plune = criar_pedido_plune(deal_id, anexar_contrato=False)
+                log_resultado_plune(deal_id, result_plune)
+                numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+            except DealValidationError as validation_error:
+                print(
+                    f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
+                    flush=True,
+                )
+                for erro in validation_error.mensagens:
+                    print(f"    - {erro}", flush=True)
+                reabrir_deal_com_erros(deal_id, validation_error.mensagens)
+                algum_processado = True
+                continue
+            except PluneError as exc:
+                print(
+                    f"[!] Plune: FALHA ao criar pedidos antes do contrato (deal {deal_id}): {exc}",
+                    flush=True,
+                )
+                continue
+
             print(f"    -> Gerando contrato...", flush=True)
-            doc_path = fill_contract(deal)
+            doc_path = fill_contract(deal, numeros_pedidos=numeros_pedidos)
+            if doc_path:
+                anexar_contrato_local_aos_pedidos_deal(deal_id)
 
             sequence_dinamica = extrair_signatarios(deal)
 
             if doc_path:
 
-                def _apos_contrato_gerado_sem_clicksign_msg():
-                    criar_pedidos_plune_no_ganho(
-                        deal_id, "contrato gerado; Clicksign pulado em dev"
-                    )
+                def _apos_contrato_dev_sem_envelope_msg():
                     if not TESTE_PLUNE_SEM_ASSINATURA:
                         print(
                             f"[*] Pós-assinatura: com DEV_PULAR_CLICKSIGN não há envelope para aprovar depois. "
@@ -744,7 +770,7 @@ def processar_deals_pendentes():
                     )
                     salvar_deal_processado(deal_id, won_time_str)
                     algum_processado = True
-                    _apos_contrato_gerado_sem_clicksign_msg()
+                    _apos_contrato_dev_sem_envelope_msg()
                 elif len(sequence_dinamica) > 0:
                     print(f"    -> Enviando para Clicksign...", flush=True)
                     envelope_name = f"Contrato Deal {deal_id} - {deal.get('title')}"
@@ -761,9 +787,6 @@ def processar_deals_pendentes():
                         flush=True,
                     )
 
-                    criar_pedidos_plune_no_ganho(
-                        deal_id, "contrato enviado ao Clicksign"
-                    )
                     if not TESTE_PLUNE_SEM_ASSINATURA:
                         print(
                             f"[*] Pós-assinatura: quando o envelope fechar, os pedidos Plune serão aprovados. "
@@ -852,9 +875,13 @@ def main():
     if not os.path.exists(PASTA_SAIDA):
         os.makedirs(PASTA_SAIDA)
 
+    agora_utc = datetime.now(timezone.utc)
+    inicializar_corte_temporal()
+
     print("--- INICIANDO AUTOMACAO (PIPEDRIVE -> CLICKSIGN -> PLUNE) ---")
     print(
-        f"[*] Script iniciado em: {DATA_INICIO_SCRIPT.strftime('%d/%m/%Y %H:%M:%S')} UTC"
+        f"[*] Script iniciado em: {formatar_data_hora_brasilia(agora_utc)} "
+        f"(horário de Brasília)"
     )
     from core.config import MYSQL_DATABASE, MYSQL_HOST
 
@@ -863,7 +890,9 @@ def main():
         f"(deals, pedidos Plune, envelopes; legado txt/json migrado na 1ª execução)."
     )
     print(
-        f"[*] Corte temporal: só deals com won_time **depois** de {DATA_INICIO_SCRIPT.strftime('%d/%m/%Y %H:%M:%S')} UTC."
+        f"[*] Corte temporal: won_time a partir de "
+        f"{formatar_data_hora_brasilia(DATA_INICIO_SCRIPT)} (Brasília), "
+        f"com margem de {CORTE_TEMPORAL_GRACE_MINUTOS} min antes do arranque."
     )
     if TESTE_PLUNE_SEM_ASSINATURA:
         print(
@@ -885,8 +914,8 @@ def main():
         n_ciclo = 0
         while True:
             n_ciclo += 1
-            agora = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M:%S")
-            print(f"--- Ciclo #{n_ciclo} ({agora} UTC) ---", flush=True)
+            agora = formatar_data_hora_brasilia(datetime.now(timezone.utc))
+            print(f"--- Ciclo #{n_ciclo} ({agora} — Brasília) ---", flush=True)
             processar_deals_pendentes()
             processar_contratos_assinados()
             time.sleep(INTERVALO_POLLING_SEGUNDOS)

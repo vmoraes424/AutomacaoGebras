@@ -23,11 +23,20 @@ def main() -> int:
 
     print("\nbranch_config:")
     with db_conn() as conn:
-        for row in conn.execute(
-            "SELECT branch_id, label, subcentro_custo_id FROM branch_config ORDER BY branch_id"
-        ):
+        rows = conn.execute(
+            """
+            SELECT branch_id, label, subcentro_custo_id, pedido_serie, pedido_modelo_id
+            FROM branch_config ORDER BY branch_id
+            """
+        ).fetchall()
+        for row in rows:
+            serie = row.get("pedido_serie", "?")
+            modelo = row.get("pedido_modelo_id", "?")
+            nf = "NFS-e" if str(serie) == "0" else "NFSe" if str(serie) == "1" else serie
             print(
-                f"  {row['branch_id']} {row['label']}: subcentro1={row['subcentro_custo_id']}"
+                f"  {row['branch_id']} {row['label']}: "
+                f"subcentro1={row['subcentro_custo_id']}, "
+                f"serie={serie} ({nf}), modelo={modelo}"
             )
 
     for branch_id in ("751", "790"):

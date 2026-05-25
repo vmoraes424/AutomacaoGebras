@@ -12,7 +12,9 @@ from core.plune_pedido import (
     TIPO_PEDIDO_RECORRENTE,
     PluneError,
     _anexar_documentos_pedido_criado,
+    _descricao_pedido_plune,
     _criar_pedido_plune_tipo,
+    _montar_query_insert_pedido,
     _ordenar_resultados_por_tipo,
     _pedido_integracao_tipo,
     _pedidos_plune_deal_resolvidos,
@@ -20,6 +22,115 @@ from core.plune_pedido import (
     criar_pedido_plune,
 )
 from core.pedido_anexos import CacheAnexosDeal
+from core.pipedrive_fields import (
+    FIELD_GESTAO_USINA_FOTOVOLTAICA,
+    FIELD_NUMERO_CONTRATO_P1,
+    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_VALOR_IMPLANTACAO,
+    FIELD_VALOR_MENSAL,
+)
+
+
+def _parametros_query(query: list[tuple[str, str]]) -> dict[str, str]:
+    return dict(query)
+
+
+def _deal_comissao():
+    return {
+        "id": 746,
+        "title": "Teste",
+        "custom_fields": {
+            FIELD_NUMERO_CONTRATO_P1: "123",
+            FIELD_NUMERO_CONTRATO_P2: "456",
+            FIELD_VALOR_IMPLANTACAO: "7000",
+            FIELD_VALOR_MENSAL: "789",
+            FIELD_GESTAO_USINA_FOTOVOLTAICA: 7,
+        },
+    }
+
+
+def _parceiro_minimo():
+    return {
+        "id": "999",
+        "razao_social": "Cliente Teste",
+        "documento": "12345678000190",
+        "documento_formatado": "12.345.678/0001-90",
+    }
+
+
+class TestDescricaoPedido:
+    def test_implantacao_com_sufixo(self):
+        deal = {
+            "id": 746,
+            "custom_fields": {
+                FIELD_NUMERO_CONTRATO_P1: "123",
+                FIELD_NUMERO_CONTRATO_P2: "456",
+            },
+        }
+        assert (
+            _descricao_pedido_plune(deal, TIPO_PEDIDO_IMPLANTACAO)
+            == "Nome do contrato -> CGRc123i456n1r0a26 IMPLANTAÇÃO"
+        )
+
+    def test_recorrente_sem_sufixo(self):
+        deal = {
+            "id": 746,
+            "custom_fields": {
+                FIELD_NUMERO_CONTRATO_P1: "123",
+                FIELD_NUMERO_CONTRATO_P2: "456",
+            },
+        }
+        assert (
+            _descricao_pedido_plune(deal, TIPO_PEDIDO_RECORRENTE)
+            == "Nome do contrato -> CGRc123i456n1r0a26"
+        )
+
+
+class TestMontarQueryInsertPedido:
+    @patch("core.plune_catalog.resolver_subcentro", return_value=None)
+    @patch("core.plune_pedido.settings_por_branch")
+    @patch("core.plune_pedido._montar_observacoes_pedido", return_value={})
+    @patch("core.plune_pedido._aplicar_dados_cliente_pedido")
+    @patch("core.plune_pedido._resolver_tipo_contrato_id", return_value="49")
+    @patch("core.plune_pedido._parametro_contabil_id", return_value="1077")
+    @patch("core.plune_pedido._resolver_branch_id", return_value="751")
+    def test_comissao_na_url_insert(
+        self,
+        _branch,
+        _param,
+        _tipo_contrato,
+        _cliente,
+        _obs,
+        mock_settings,
+        _sub,
+    ):
+        mock_settings.return_value = {
+            "subcentro_custo_id": "",
+            "pedido_serie": "1",
+            "pedido_modelo_id": "01",
+            "regional_map": {},
+            "subcentro3_map": {},
+        }
+        deal = _deal_comissao()
+        parceiro = _parceiro_minimo()
+
+        q_impl = _parametros_query(
+            _montar_query_insert_pedido(deal, parceiro, TIPO_PEDIDO_IMPLANTACAO)
+        )
+        assert q_impl["Venda.Pedido.BaseComissao"] == "7.000,00"
+        assert q_impl["Venda.Pedido.ValorComissao"] == "7.000,00"
+        assert q_impl["Venda.Pedido.PercentualComissao"] == "0,001"
+        assert q_impl["Venda.Pedido.Serie"] == "1"
+        assert q_impl["Venda.Pedido.ModeloId"] == "01"
+        assert q_impl["Venda.Pedido.TipoContratoId"] == "49"
+
+        q_rec = _parametros_query(
+            _montar_query_insert_pedido(deal, parceiro, TIPO_PEDIDO_RECORRENTE)
+        )
+        assert q_rec["Venda.Pedido.BaseComissao"] == "789,00"
+        assert q_rec["Venda.Pedido.ValorComissao"] == "9.468,00"
+        assert q_rec["Venda.Pedido.PercentualComissao"] == "7"
+        assert q_rec["Venda.Pedido.Serie"] == "1"
 
 
 class TestHelpers:

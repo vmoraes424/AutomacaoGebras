@@ -57,14 +57,14 @@ Valores fixos ilustrativos (podem mudar com o tempo no código):
 | `Venda.Pedido.Aprovado` | `1` |
 | `Venda.Pedido.Status` | `5` |
 | `Venda.Pedido.StatusPedido` | `31` (no comentário do código: executado/FIN para fluxo Hub) |
-| `Venda.Pedido.ModeloId` | `01` |
+| `Venda.Pedido.ModeloId` | Por filial em `branch_config.pedido_modelo_id` (ambas `01`) — deve casar com `Venda.NotaConfig` |
 | `Venda.Pedido.NaturezaOperacaoServicoId` | `2` |
-| `Venda.Pedido.Serie` | `1` |
-| `Venda.Pedido.TipoContratoId` | `3` (Direito de energia — contexto Hub) |
+| `Venda.Pedido.Serie` | Por filial em `branch_config.pedido_serie`: **Matriz `1` (NFSe)**, **ISM `0` (NFS-e)** — o código `0`/`1` só faz sentido junto com o modelo cadastrado na filial |
+| `Venda.Pedido.TipoContratoId` | Implantação: `1` (IMPLANTAÇÃO). Recorrente: serviço com **maior UC** no Pipedrive (ex.: Usina `49`, Qualidade `48`, Mercado Livre `41`, SOLE `4`). **Sem fallback** — sem UC válida o Insert falha. |
 | `Venda.Pedido.CentroCustoId` | `5` |
 | `Venda.Pedido.ParcelamentoAutomatico` | `1` |
 | `Venda.Pedido.ComissaoManual` | `1` |
-| `Venda.Pedido.PercentualComissao` | `0,001` (URL-encoded como `0%2C001`) |
+| `Venda.Pedido.BaseComissao` / `ValorComissao` / `PercentualComissao` | Implantação: base = valor do pedido, `ValorComissao` = **valor do pedido**, `PercentualComissao` = **0,001**. Recorrente: base = mensalidade, `ValorComissao` = **12 × valor do pedido**, `PercentualComissao` = **total de UCs**. |
 
 **Depois** concatenam-se os campos variáveis (ex.: `Descricao`, `DataEntrega`, `BranchId`, `ClienteId`, centros de custo, `TipoOpId`, `Observacao`, colunas customizadas `*_COL`, etc.) — ver implementação em `TicketServices.MontarQueryStringVendaPedidoInsertRessarcimento` (ramo **não** atualizar pedido pai).
 
