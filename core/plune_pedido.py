@@ -61,6 +61,8 @@ from .pipedrive_fields import (
     FIELD_INDICADORES_QUALIDADE,
     FIELD_NUMERO_CONTRATO_P1,
     FIELD_NUMERO_CONTRATO_P2,
+    FIELD_OBSERVACOES_DETALHES,
+    FIELD_PERCENTUAL_EXITO,
     FIELD_QUALIDADE_ENERGIA,
     FIELD_QTD_SOLE,
     FIELD_REGIONAL,
@@ -75,6 +77,7 @@ from .pipedrive_fields import (
     get_documento,
     get_nome_cliente,
     get_numero_contrato,
+    get_enum_label,
     get_val,
     normalizar_cep,
     normalizar_documento,
@@ -86,8 +89,11 @@ from .plune_errors import PluneApiError, PluneError  # noqa: F401 — reexport
 
 
 def _plune_aprovado_insert() -> str:
-    """Valor de Venda.Pedido.Aprovado no Insert (0=dev, 1=produção)."""
-    return "0" if DEV_PLUNE_APROVADO_NAO else "1"
+    """
+    No ganho, pedido sempre nasce NÃO aprovado.
+    Aprovação ocorre apenas após última assinatura (aprovar_pedidos_plune).
+    """
+    return "0"
 
 
 # InsertPedidoBase (URLs.cs) — ordem na URL; Aprovado logo após CompanyId
@@ -126,7 +132,7 @@ _INSERT_BASE_KEYS = {
 # Defaults internos (montagem do cabeçalho)
 _PEDIDO_DEFAULTS = {
     "CompanyId": PLUNE_COMPANY_ID,
-    "Aprovado": "1",
+    "Aprovado": "0",
     "Status": "5",
     "StatusPedido": PLUNE_STATUS_PEDIDO,
     "ModeloId": "01",
@@ -655,6 +661,96 @@ def formatar_linha_pedidos_plune_contrato(numeros: dict[str, str]) -> str:
     return " | ".join(partes) if partes else "—"
 
 
+def _atualizar_campos_pedido_plune(
+    pedido_id: str, cliente_id: str, campos: dict[str, str]
+) -> None:
+    """Update parcial (ex.: PedidoOriginal em Detalhes | Outros)."""
+    if not campos:
+        return
+    params: list[tuple[str, str]] = [
+        ("Venda.Pedido.CompanyId", PLUNE_COMPANY_ID),
+        ("Venda.Pedido.ClienteId", str(cliente_id)),
+        ("Venda.Pedido.Id", str(pedido_id)),
+    ]
+    for key, value in campos.items():
+        if value not in (None, ""):
+            params.append((f"Venda.Pedido.{key}", str(value)))
+    _plune_get("Venda.Pedido", "Update", params)
+
+
+def _buscar_observacao_pedido_plune(pedido_id: str, cliente_id: str) -> str:
+    """Lê Observacao atual do pedido para poder complementar sem sobrescrever."""
+    prefix = "Venda.Pedido."
+    params = {
+        f"{prefix}CompanyId": PLUNE_COMPANY_ID,
+        f"{prefix}ClienteId": str(cliente_id),
+        f"{prefix}Id": str(pedido_id),
+        "_Venda.Pedido.BrowseSequence": ["Id", "Observacao"],
+        "_Venda.Pedido.BrowseLimit": "2",
+    }
+    payload = _plune_get("Venda.Pedido", "Browse", params)
+    rows = payload.get("data", {}).get("row", []) or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not rows:
+        return ""
+    return _field_value(rows[0], "Observacao").strip()
+
+
+def _montar_bloco_pedidos_vinculados(*, id_impl: str, id_rec: str) -> str:
+    return "\n".join(
+        [
+            "PEDIDOS VINCULADOS:",
+            f"Implantação: {id_impl}",
+            f"Recorrente: {id_rec}",
+        ]
+    )
+
+
+def _atualizar_observacao_com_pedidos_vinculados(
+    pedido_id: str, cliente_id: str, *, id_impl: str, id_rec: str
+) -> None:
+    atual = _buscar_observacao_pedido_plune(pedido_id, cliente_id)
+    bloco = _montar_bloco_pedidos_vinculados(id_impl=id_impl, id_rec=id_rec)
+    if bloco in atual:
+        return
+    novo = f"{atual}\n\n{bloco}".strip() if atual else bloco
+    _atualizar_campos_pedido_plune(pedido_id, cliente_id, {"Observacao": novo})
+
+
+def vincular_pedidos_plune_implantacao_recorrente(
+    resultados: list[dict], *, cliente_id: str
+) -> dict[str, str]:
+    """
+    Preenche Detalhes | Outros | Pedido Original (PedidoOriginal) nos dois sentidos:
+    implantação aponta para o nº do recorrente e vice-versa.
+    """
+    numeros = extrair_numeros_pedidos_plune({"pedidos": resultados})
+    id_impl = numeros.get(TIPO_PEDIDO_IMPLANTACAO)
+    id_rec = numeros.get(TIPO_PEDIDO_RECORRENTE)
+    if not id_impl or not id_rec:
+        return numeros
+
+    cliente_id = str(cliente_id).strip()
+    _atualizar_campos_pedido_plune(
+        id_impl, cliente_id, {"PedidoOriginal": id_rec}
+    )
+    _atualizar_campos_pedido_plune(
+        id_rec, cliente_id, {"PedidoOriginal": id_impl}
+    )
+    _atualizar_observacao_com_pedidos_vinculados(
+        id_impl, cliente_id, id_impl=id_impl, id_rec=id_rec
+    )
+    _atualizar_observacao_com_pedidos_vinculados(
+        id_rec, cliente_id, id_impl=id_impl, id_rec=id_rec
+    )
+    print(
+        f"[*] Pedidos Plune vinculados: implantação {id_impl} ↔ recorrente {id_rec} "
+        "(PedidoOriginal)"
+    )
+    return numeros
+
+
 def anexar_contrato_local_aos_pedidos_deal(deal_id: str) -> None:
     """Anexa o .docx local aos pedidos após fill_contract (dev / teste sem assinatura)."""
     from .config import DEV_PULAR_CLICKSIGN, TESTE_PLUNE_SEM_ASSINATURA
@@ -755,21 +851,6 @@ def _salvar_aviso_aprovacao_plune(mensagem: str) -> None:
         os.fsync(f.fileno())
 
 
-def _montar_servicos_observacao(deal: dict) -> str:
-    servicos = []
-    if _valor_ativo(get_val(deal, FIELD_QTD_SOLE)):
-        servicos.append("SOLE WEB")
-    if _valor_ativo(get_val(deal, FIELD_QUALIDADE_ENERGIA)):
-        servicos.append("SOLE CONSULTORIA")
-    if _valor_ativo(get_val(deal, FIELD_GESTAO_ACL)):
-        servicos.append("GESTÃO ACL - MERCADO LIVRE")
-    if _valor_ativo(get_val(deal, FIELD_GESTAO_USINA_FOTOVOLTAICA)):
-        servicos.append("GESTÃO USINA FOTOVOLTAICA")
-    if _valor_ativo(get_val(deal, FIELD_INDICADORES_QUALIDADE)):
-        servicos.append("GESTÃO DA QUALIDADE DE ENERGIA")
-    return " + ".join(servicos)
-
-
 def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
     deal_id = str(deal.get("id", ""))
     title = str(deal.get("title", "")).strip()
@@ -780,16 +861,12 @@ def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
     gestao_acl = get_val(deal, FIELD_GESTAO_ACL)
     gestao_usina = get_val(deal, FIELD_GESTAO_USINA_FOTOVOLTAICA)
     qualidade_energia = get_val(deal, FIELD_INDICADORES_QUALIDADE)
-    servicos = _montar_servicos_observacao(deal)
 
-    label_tipo = _PEDIDO_TIPO_CONFIG[tipo_pedido]["label"].upper()
-    observacao = [f"SERVIÇO ({label_tipo}):"]
-    if title and servicos:
-        observacao.append(f"{title}: {servicos}")
-    elif title:
-        observacao.append(title)
-    elif servicos:
-        observacao.append(servicos)
+    observacao: list[str] = []
+
+    obs_pipe = get_val(deal, FIELD_OBSERVACOES_DETALHES).strip()
+    if obs_pipe:
+        observacao.append(obs_pipe)
 
     if tipo_pedido == TIPO_PEDIDO_RECORRENTE and valor_mensal:
         observacao.extend(
@@ -801,8 +878,9 @@ def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
             ["", f"IMPLANTAÇÃO: {_formatar_moeda_observacao(valor_implantacao)}"]
         )
 
-    if tipo_pedido == TIPO_PEDIDO_RECORRENTE:
-        observacao.extend(["", "ÊXITO GEBRAS: 20%"])
+    percentual_exito = get_enum_label(deal, FIELD_PERCENTUAL_EXITO).strip()
+    if percentual_exito:
+        observacao.extend(["", f"ÊXITO GEBRAS: {percentual_exito}"])
 
     observacao.extend(
         [
@@ -847,7 +925,7 @@ def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
 
 
 def _descricao_pedido_plune(deal: dict, tipo_pedido: str) -> str:
-    """Geral | Descrição: Nome do contrato -> CGRc… (implantação com sufixo IMPLANTAÇÃO)."""
+    """Geral | Descrição: somente código do contrato (CGRc...)."""
     deal_id = str(deal.get("id", ""))
     p1 = get_val(deal, FIELD_NUMERO_CONTRATO_P1).strip()
     p2 = get_val(deal, FIELD_NUMERO_CONTRATO_P2).strip()
@@ -856,11 +934,7 @@ def _descricao_pedido_plune(deal: dict, tipo_pedido: str) -> str:
             f"Deal {deal_id}: campos de número do contrato (P1/P2) ausentes no Pipedrive "
             "— necessários para Venda.Pedido.Descricao."
         )
-    nome_contrato = get_numero_contrato(deal)
-    texto = f"Nome do contrato -> {nome_contrato}"
-    if tipo_pedido == TIPO_PEDIDO_IMPLANTACAO:
-        texto = f"{texto} IMPLANTAÇÃO"
-    return texto[:128]
+    return get_numero_contrato(deal)[:128]
 
 
 def _montar_params_pedido(deal: dict, parceiro: dict, tipo_pedido: str) -> dict:
@@ -891,13 +965,13 @@ def _montar_params_pedido(deal: dict, parceiro: dict, tipo_pedido: str) -> dict:
         params["SubCentroCustoId"] = branch_cfg["subcentro_custo_id"]
     from .plune_catalog import resolver_subcentro
 
-    regional = get_val(deal, FIELD_REGIONAL).strip()
+    regional = get_enum_label(deal, FIELD_REGIONAL).strip()
     subcentro2_id = resolver_subcentro(branch_id, 2, regional) or branch_cfg[
         "regional_map"
     ].get(regional)
     if subcentro2_id:
         params["SubCentroCusto2Id"] = str(subcentro2_id)
-    subcentro3 = get_val(deal, FIELD_SUBCENTRO_NIVEL_3).strip()
+    subcentro3 = get_enum_label(deal, FIELD_SUBCENTRO_NIVEL_3).strip()
     subcentro3_id = resolver_subcentro(branch_id, 3, subcentro3) or branch_cfg[
         "subcentro3_map"
     ].get(subcentro3)
@@ -1041,7 +1115,7 @@ _INSERT_PARAMS_SUBSTITUIR_OU_ACRESCENTAR = frozenset(
 def _montar_query_insert_pedido(
     deal: dict, parceiro: dict, tipo_pedido: str
 ) -> list[tuple[str, str]]:
-    """Query do Insert na ordem do InsertPedidoBase (C#), com Venda.Pedido.Aprovado conforme ambiente."""
+    """Query do Insert na ordem do InsertPedidoBase (C#), sempre com Aprovado=0."""
     params = _montar_params_pedido(deal, parceiro, tipo_pedido)
     branch_id = str(params.get("BranchId") or _resolver_branch_id(deal))
     preco = params.pop("_valor_item_preco", None)
@@ -1169,19 +1243,18 @@ def _criar_pedido_plune_tipo(
     pedido_id = _field_value(field, "Id")
     esperado = _plune_aprovado_insert()
     aprovado = _field_value(field, "Aprovado")
-    aprovado_ok = aprovado in (esperado, f"{esperado}.0")
-    if not aprovado_ok and esperado == "1":
+    aprovado_insert_ok = aprovado in (esperado, f"{esperado}.0")
+    aprovado_flag = aprovado in ("1", "1.0")
+    if not aprovado_insert_ok:
         mensagem_aprovacao = (
-            "Plune não aprovou automaticamente o pedido após o Insert: "
-            f"enviado Venda.Pedido.Aprovado=1, mas o retorno veio Aprovado={aprovado or '0'}. "
+            "Plune retornou Aprovado inesperado no Insert: "
+            f"enviado Venda.Pedido.Aprovado={esperado}, mas o retorno veio Aprovado={aprovado or '0'}. "
             f"PedidoId={pedido_id or '-'}, PedidoIntegracao={chave_integracao}, "
             f"tipo={tipo_pedido}, StatusPedido={tipo_config['status_pedido']}, "
             f"ParametroContabilId={parametro_contabil}. "
-            "Validar permissão/regra do usuário/token da API para aprovar pedido no cadastro."
+            "No fluxo oficial, o pedido deve nascer não aprovado e ser aprovado só após assinatura."
         )
-        print(
-            f"[!] {mensagem_aprovacao}"
-        )
+        print(f"[!] {mensagem_aprovacao}")
         _salvar_aviso_aprovacao_plune(mensagem_aprovacao)
     else:
         mensagem_aprovacao = ""
@@ -1207,7 +1280,7 @@ def _criar_pedido_plune_tipo(
         "cliente_nome": parceiro.get("razao_social"),
         "parceiro_criado": parceiro_criado,
         "pedido_id": pedido_id,
-        "aprovado": aprovado_ok,
+        "aprovado": aprovado_flag,
         "status_pedido": tipo_config["status_pedido"],
         "parametro_contabil_id": parametro_contabil,
     }
@@ -1239,6 +1312,7 @@ def _aprovar_pedido_plune_tipo(
     branch_id = str(pedido.get("branch_id") or "").strip()
     if pedido["aprovado"]:
         anexos: dict = {}
+        contrato = None
         if branch_id:
             contrato = anexar_contrato_pedido(
                 deal_id,
@@ -1250,16 +1324,57 @@ def _aprovar_pedido_plune_tipo(
             if contrato:
                 anexos["contrato"] = contrato
         out = {
-            "status": "skipped",
+            "status": "skipped" if contrato else "pending_contract",
             "deal_id": deal_id,
             "tipo": tipo_pedido,
             "pedido_integracao": chave_integracao,
             "pedido_id": pedido["id"],
-            "reason": "already_approved",
+            "reason": "already_approved" if contrato else "signed_contract_unavailable",
         }
         if anexos:
             out["anexos"] = anexos
         return out
+
+    # Regra de negócio: nunca aprovar sem contrato assinado disponível para anexar.
+    contrato_pre: dict | None = None
+    if not branch_id:
+        return {
+            "status": "pending_contract",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "pedido_id": pedido["id"],
+            "aprovado": False,
+            "reason": "branch_id_missing_for_contract",
+        }
+    contrato_pre = anexar_contrato_pedido(
+        deal_id,
+        pedido["id"],
+        branch_id,
+        permitir_docx_local=False,
+        cache=cache,
+    )
+    if not contrato_pre:
+        return {
+            "status": "pending_contract",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "pedido_id": pedido["id"],
+            "aprovado": False,
+            "reason": "signed_contract_unavailable",
+        }
+    if contrato_pre.get("erro"):
+        return {
+            "status": "pending_contract",
+            "deal_id": deal_id,
+            "tipo": tipo_pedido,
+            "pedido_integracao": chave_integracao,
+            "pedido_id": pedido["id"],
+            "aprovado": False,
+            "reason": "contract_attach_failed",
+            "anexos": {"contrato": contrato_pre},
+        }
 
     params = {
         "Venda.Pedido.CompanyId": PLUNE_COMPANY_ID,
@@ -1290,6 +1405,7 @@ def _aprovar_pedido_plune_tipo(
             "pedido_id": pedido["id"],
             "aprovado": False,
             "aviso_aprovacao": mensagem,
+            "anexos": {"contrato": contrato_pre},
         }
 
     field = payload.get("Field") or {}
@@ -1305,17 +1421,7 @@ def _aprovar_pedido_plune_tipo(
         print(f"[!] {mensagem}")
         _salvar_aviso_aprovacao_plune(mensagem)
 
-    anexos: dict = {}
-    if aprovado_ok and branch_id:
-        contrato = anexar_contrato_pedido(
-            deal_id,
-            pedido["id"],
-            branch_id,
-            permitir_docx_local=False,
-            cache=cache,
-        )
-        if contrato:
-            anexos["contrato"] = contrato
+    anexos: dict = {"contrato": contrato_pre}
 
     result = {
         "status": "approved" if aprovado_ok else "not_approved",
@@ -1388,6 +1494,9 @@ def criar_pedido_plune(deal_id: str, *, anexar_contrato: bool | None = None) -> 
         for futuro in as_completed(futuros):
             resultados.append(futuro.result())
     resultados = _ordenar_resultados_por_tipo(resultados)
+    vincular_pedidos_plune_implantacao_recorrente(
+        resultados, cliente_id=str(parceiro["id"])
+    )
 
     if _pedidos_plune_deal_resolvidos(resultados):
         ids = [
@@ -1453,7 +1562,9 @@ def aprovar_pedidos_plune(
             resultados.append(futuro.result())
     resultados = _ordenar_resultados_por_tipo(resultados)
 
-    if any(r.get("status") == "approved" for r in resultados):
+    if any(r.get("status") == "pending_contract" for r in resultados):
+        status = "pending_contract"
+    elif any(r.get("status") == "approved" for r in resultados):
         status = "approved"
     elif all(r.get("status") == "skipped" for r in resultados):
         status = "skipped"

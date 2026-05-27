@@ -50,7 +50,7 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
 }
 _SEED_DEFAULT_BRANCH_ID = "790"
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _initialized = False
 
 
@@ -289,6 +289,14 @@ def _migrate_schema(conn: DbConnection) -> None:
             """,
             ("0", "01", "790"),
         )
+    if version < 6:
+        # Remove coluna que chegou a existir em versões intermediárias
+        try:
+            conn.execute("ALTER TABLE plune_subcentro DROP COLUMN resp_comercial")
+        except pymysql.err.OperationalError as exc:
+            # 1091 = Can't DROP ... check that column/key exists
+            if exc.args[0] != 1091:
+                raise
     conn.execute(
         "UPDATE app_meta SET value = %s WHERE `key` = 'schema_version'",
         (str(_SCHEMA_VERSION),),

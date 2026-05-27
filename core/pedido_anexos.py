@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import glob
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +21,9 @@ from .config import (
 from .envelope_state import buscar_por_deal_id
 from .pipedrive_files import baixar_pdf_proposta_deal
 from .plune_anexo import inserir_anexo_pedido
+
+_SIGNED_CONTRACT_RETRIES = 4
+_SIGNED_CONTRACT_RETRY_WAIT_SEC = 3
 
 
 def _mime_por_extensao(nome: str) -> str:
@@ -57,7 +61,13 @@ def _contrato_clicksign_assinado(deal_id: str) -> tuple[bytes, str] | None:
     cliente = ClicksignClient(CLICKSIGN_BASE_URL, CLICKSIGN_ACCESS_TOKEN)
     if cliente.get_envelope_status(envelope_id) != "closed":
         return None
-    return cliente.baixar_pdf_assinado(envelope_id)
+    for attempt in range(1, _SIGNED_CONTRACT_RETRIES + 1):
+        pdf = cliente.baixar_pdf_assinado(envelope_id)
+        if pdf:
+            return pdf
+        if attempt < _SIGNED_CONTRACT_RETRIES:
+            time.sleep(_SIGNED_CONTRACT_RETRY_WAIT_SEC)
+    return None
 
 
 def obter_bytes_contrato(

@@ -5,13 +5,17 @@ import requests
 from .config import PIPEDRIVE_API_TOKEN, PLUNE_CENTRO_CUSTO_ID
 from .database import default_branch_id, filial_tem_mapeamento
 from .pipedrive_fields import (
+    CAMPOS_CONTRATO_OBRIGATORIOS,
+    CAMPOS_SERVICO_UC,
     FIELD_DOCUMENTO,
+    FIELD_FILIAL,
     FIELD_REGIONAL,
     FIELD_SUBCENTRO_NIVEL_3,
-    FIELD_VALOR_MENSAL,
+    get_enum_label,
     get_filial_chaves,
     get_filial_label,
     get_val,
+    normalizar_cep,
     resolver_branch_id,
     settings_por_branch,
 )
@@ -53,68 +57,149 @@ def _documento_valido(valor: str) -> bool:
     return len(digits) in (11, 14)
 
 
-def validar_deal_para_automacao(deal: dict) -> None:
-    deal_id = str(deal.get("id", ""))
-    erros = []
+def _email_valido(valor: str) -> bool:
+    texto = (valor or "").strip()
+    return bool(texto) and "@" in texto and "." in texto.split("@")[-1]
 
-    valor_mensal = get_val(deal, FIELD_VALOR_MENSAL)
-    if not _valor_numero_maior_que_um(valor_mensal):
-        erros.append(
-            "Campo obrigatório inválido: Valor Recorrência (valor mensal). "
-            f"Informe um número maior que 1. Valor recebido: {valor_mensal!r}."
+
+def _campo_presente_no_deal(deal: dict, field_code: str) -> bool:
+    cf = deal.get("custom_fields") or {}
+    if field_code in cf:
+        raw = cf[field_code]
+        return raw is not None and raw != ""
+    return field_code in deal and deal[field_code] not in (None, "")
+
+
+def _validar_campo_contrato(deal: dict, label: str, field_code: str, tipo: str) -> str | None:
+    if tipo == "enum":
+        valor = get_enum_label(deal, field_code).strip()
+        if not valor:
+            return (
+                f"Campo obrigatório ausente: {label}. "
+                f"Selecione uma opção na seção Contrato do deal."
+            )
+        return None
+
+    if tipo == "documento":
+        valor = get_val(deal, field_code).strip()
+        if not _documento_valido(valor):
+            return (
+                f"Campo obrigatório inválido: {label}. "
+                f"Informe CPF (11 dígitos) ou CNPJ (14 dígitos). Valor recebido: {valor!r}."
+            )
+        return None
+
+    if tipo == "cep":
+        valor = get_val(deal, field_code)
+        cep = normalizar_cep(valor)
+        if len(cep) != 8:
+            return (
+                f"Campo obrigatório inválido: {label}. "
+                f"Informe CEP com 8 dígitos. Valor recebido: {valor!r}."
+            )
+        return None
+
+    if tipo == "email":
+        valor = get_val(deal, field_code).strip()
+        if not _email_valido(valor):
+            return (
+                f"Campo obrigatório inválido: {label}. "
+                f"Informe um e-mail válido. Valor recebido: {valor!r}."
+            )
+        return None
+
+    if tipo == "uc":
+        if not _campo_presente_no_deal(deal, field_code):
+            return (
+                f"Campo obrigatório ausente: {label}. "
+                f"Informe a quantidade de UCs (use 0 se não contratar o serviço)."
+            )
+        if _decimal_pipe(get_val(deal, field_code)) is None:
+            return (
+                f"Campo obrigatório inválido: {label}. "
+                f"Informe um número. Valor recebido: {get_val(deal, field_code)!r}."
+            )
+        return None
+
+    if tipo == "money_mensal":
+        valor = get_val(deal, field_code)
+        if not _valor_numero_maior_que_um(valor):
+            return (
+                f"Campo obrigatório inválido: {label}. "
+                f"Informe um valor maior que 1. Valor recebido: {valor!r}."
+            )
+        return None
+
+    if tipo == "date":
+        valor = get_val(deal, field_code).strip()
+        if not valor:
+            return (
+                f"Campo obrigatório ausente: {label}. "
+                f"Informe a data na seção Contrato do deal."
+            )
+        return None
+
+    # text e demais
+    valor = get_val(deal, field_code).strip()
+    if not valor:
+        return (
+            f"Campo obrigatório ausente: {label}. "
+            f"Preencha o campo na seção Contrato do deal."
         )
+    return None
 
-    documento = get_val(deal, FIELD_DOCUMENTO)
-    if not _documento_valido(documento):
-        erros.append(
-            "Campo obrigatório inválido: CNPJ/CPF. "
-            f"Informe um documento com 11 ou 14 dígitos. Valor recebido: {documento!r}."
-        )
 
+def _validar_mapeamento_plune(deal: dict, erros: list[str]) -> str:
+    """Retorna branch_id resolvido ou '' se já registrou erro."""
     label_filial, id_filial = get_filial_chaves(deal)
     if not label_filial and not id_filial:
         erros.append(
             "Campo obrigatório inválido: Filial. "
             "Selecione a filial no deal (Matriz ou Iribarrem San Martin)."
         )
-    elif not filial_tem_mapeamento(label_filial, id_filial) and not default_branch_id():
+        return ""
+    if not filial_tem_mapeamento(label_filial, id_filial) and not default_branch_id():
         erros.append(
             "Filial sem mapeamento para BranchId no Plune e default_branch_id vazio. "
             f"Valor no Pipedrive: {get_filial_label(deal) or id_filial!r}. "
             "Cadastre em pipedrive_filial (MySQL) ou app_meta.default_branch_id."
         )
-    else:
-        try:
-            branch_id = resolver_branch_id(deal)
-        except ValueError as exc:
-            erros.append(str(exc))
-            branch_id = ""
-        if branch_id:
-            branch_cfg = settings_por_branch(branch_id)
-            if not branch_cfg["subcentro_custo_id"]:
-                erros.append(
-                    f"Configuração Plune ausente para filial BranchId={branch_id}: "
-                    "subcentro_custo_id (Sub Centro = Gestão de Energia)."
-                )
+        return ""
+    try:
+        return resolver_branch_id(deal)
+    except ValueError as exc:
+        erros.append(str(exc))
+        return ""
 
-    regional = get_val(deal, FIELD_REGIONAL).strip()
-    branch_id = ""
-    if label_filial or id_filial or default_branch_id():
-        try:
-            branch_id = resolver_branch_id(deal)
-        except ValueError:
-            branch_id = ""
-    branch_settings = settings_por_branch(branch_id) if branch_id else {}
+
+def validar_deal_para_automacao(deal: dict) -> None:
+    deal_id = str(deal.get("id", ""))
+    erros: list[str] = []
+
+    for label, field_code, tipo in CAMPOS_CONTRATO_OBRIGATORIOS:
+        if field_code == FIELD_FILIAL:
+            continue
+        msg = _validar_campo_contrato(deal, label, field_code, tipo)
+        if msg:
+            erros.append(msg)
+
+    branch_id = _validar_mapeamento_plune(deal, erros)
+    if branch_id:
+        branch_cfg = settings_por_branch(branch_id)
+        if not branch_cfg["subcentro_custo_id"]:
+            erros.append(
+                f"Configuração Plune ausente para filial BranchId={branch_id}: "
+                "subcentro_custo_id (Sub Centro = Gestão de Energia)."
+            )
+
     if not PLUNE_CENTRO_CUSTO_ID:
         erros.append(
             "Configuração Plune ausente: PLUNE_CENTRO_CUSTO_ID (Centro = Contratos Comerciais)."
         )
-    if not regional:
-        erros.append(
-            "Campo obrigatório inválido: Sub Centro Nível 2 (regional). Informe o valor para preencher "
-            "o Sub Centro Nível 2 no Plune."
-        )
-    elif branch_id:
+
+    regional = get_enum_label(deal, FIELD_REGIONAL).strip()
+    branch_settings = settings_por_branch(branch_id) if branch_id else {}
+    if regional and branch_id:
         sub2_id = resolver_subcentro(branch_id, 2, regional)
         if not sub2_id:
             sincronizar_subcentros_de_pedidos(force=True)
@@ -128,13 +213,8 @@ def validar_deal_para_automacao(deal: dict) -> None:
                 f"valores conhecidos na filial: {disponiveis}."
             )
 
-    subcentro3 = get_val(deal, FIELD_SUBCENTRO_NIVEL_3).strip()
-    if not subcentro3:
-        erros.append(
-            "Campo obrigatório inválido: Sub Centro Nível 3. "
-            "Informe o valor para preencher SubCentroCusto3Id no Plune."
-        )
-    elif branch_id:
+    subcentro3 = get_enum_label(deal, FIELD_SUBCENTRO_NIVEL_3).strip()
+    if subcentro3 and branch_id:
         sub3_id = resolver_subcentro(branch_id, 3, subcentro3)
         if not sub3_id:
             sincronizar_subcentros_de_pedidos(force=True)
@@ -147,6 +227,12 @@ def validar_deal_para_automacao(deal: dict) -> None:
                 f"Valor recebido: {subcentro3!r}. O catálogo é atualizado via API; "
                 f"valores conhecidos na filial: {disponiveis}."
             )
+
+    if not any(_decimal_pipe(get_val(deal, campo)) and _decimal_pipe(get_val(deal, campo)) > 0 for campo in CAMPOS_SERVICO_UC):
+        erros.append(
+            "Pelo menos um serviço (UC) deve ter quantidade maior que zero "
+            "(SOLE Web, Sole Consultoria, Gestão ACL, Usina ou Gestão da Qualidade de Energia)."
+        )
 
     if erros:
         raise DealValidationError(deal_id, erros)
@@ -193,7 +279,8 @@ def reabrir_deal_com_erros(deal_id: str, erros: list[str]) -> None:
     itens = "".join(f"<li>{erro}</li>" for erro in erros)
     nota = (
         "<p><strong>Automação Gebras:</strong> o card foi reaberto porque há "
-        "campos obrigatórios inválidos para gerar contrato/pedidos no Plune.</p>"
+        "campos obrigatórios inválidos ou ausentes na seção <strong>Contrato</strong> "
+        "(exceto Data/Valor de Implantação e Observações).</p>"
         f"<ul>{itens}</ul>"
         "<p>Corrija os campos e marque o card como ganho novamente.</p>"
     )

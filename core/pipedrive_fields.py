@@ -36,9 +36,12 @@ CAMPOS_SERVICO_UC = (
 FIELD_CONTATO_GESTOR = "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"
 FIELD_CONTATO_FINANCEIRO = "722da69afe31c1f8fa4f5457a223e2a952ae0978"
 FIELD_CONTATO_CONTRATANTE = "3002b2df87f0577585ebaec394fd09a38ca8778f"
-FIELD_REGIONAL = "3b5fc4072a4bff3e5e24dce974d20e15c6ebaed6"
-FIELD_SUBCENTRO_NIVEL_3 = "4f6e152a7d4f89dbd6664ef97980531394721599"
+FIELD_REGIONAL = "14855b5973f28e97dafd4e2abccc539d7461dc24"
+FIELD_SUBCENTRO_NIVEL_3 = "60ffe8e9c2aa51f717865559e86e6044bfb335e6"
 FIELD_FILIAL = "be20f11317ac66845bf97695f43e57795e26d01d"
+FIELD_INSCRICAO_ESTADUAL = "c3e623cfa197040b778400a8977ae2c8a8386024"
+FIELD_PERCENTUAL_EXITO = "225005fe8384d97183e5480781ea8ea82982301e"
+FIELD_OBSERVACOES_DETALHES = "4fba2f9323c64acdcac770e38f2c0cdb840796bc"
 
 SIGNER_FIELDS = [
     ("Coordenador Principal", "92359b129485b08fd024b8c28ef022e7635419a3"),
@@ -46,6 +49,48 @@ SIGNER_FIELDS = [
     ("Gestor Gebras", "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"),
     ("Diretor Principal", "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2"),
 ]
+
+# Seção Contrato no Pipedrive: obrigatórios para automação, exceto CAMPOS_CONTRATO_OPCIONAIS
+CAMPOS_CONTRATO_OPCIONAIS = frozenset(
+    {
+        FIELD_DATA_IMPLANTACAO,
+        FIELD_VALOR_IMPLANTACAO,
+        FIELD_OBSERVACOES_DETALHES,
+    }
+)
+
+# (rótulo no Pipedrive, hash, tipo) — text | enum | email | cep | uc | money_mensal | date | documento
+CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
+    ("Filial", FIELD_FILIAL, "enum"),
+    ("Dados da Contratante", FIELD_NOME_CLIENTE, "text"),
+    ("Endereço", FIELD_ENDERECO, "text"),
+    ("CEP", FIELD_CEP, "cep"),
+    ("Município/Estado", FIELD_CIDADE, "text"),
+    ("CPF/CNPJ", FIELD_DOCUMENTO, "documento"),
+    ("Inscrição Estadual", FIELD_INSCRICAO_ESTADUAL, "text"),
+    ("Código da Instalação", FIELD_NUMERO_CONTRATO_P1, "text"),
+    ("Código Cliente", FIELD_NUMERO_CONTRATO_P2, "text"),
+    ("SOLE Web", FIELD_QTD_SOLE, "uc"),
+    ("Sole Consultoria", FIELD_QUALIDADE_ENERGIA, "uc"),
+    ("Gestão ACL - Mercado Livre de Energia", FIELD_GESTAO_ACL, "uc"),
+    ("Gestão Usina Fotovoltaica", FIELD_GESTAO_USINA_FOTOVOLTAICA, "uc"),
+    ("Gestão da Qualidade de Energia", FIELD_INDICADORES_QUALIDADE, "uc"),
+    ("Valor Recorrência", FIELD_VALOR_MENSAL, "money_mensal"),
+    (
+        "Data de Pagamento da Primeira Cobrança Mensal",
+        FIELD_DATA_PRIMEIRA_COBRANCA,
+        "date",
+    ),
+    ("Porcentagem de Exito", FIELD_PERCENTUAL_EXITO, "enum"),
+    ("Sub Centro Nível 2", FIELD_REGIONAL, "enum"),
+    ("Sub Centro Nível 3", FIELD_SUBCENTRO_NIVEL_3, "enum"),
+    ("E-mail Coordenador", "92359b129485b08fd024b8c28ef022e7635419a3", "email"),
+    ("E-mail Assinante do Contrato", "a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6", "email"),
+    ("E-mail Gestor GEBRAS", FIELD_CONTATO_GESTOR, "email"),
+    ("E-mail Diretor", "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2", "email"),
+    ("Email Financeiro Contratante", FIELD_CONTATO_FINANCEIRO, "email"),
+    ("E-mail Gestor Contratante", FIELD_CONTATO_CONTRATANTE, "email"),
+)
 
 
 def get_custom_fields(deal_data: dict) -> dict:
@@ -58,6 +103,58 @@ def get_val(deal_data: dict, code: str) -> str:
     if isinstance(v, dict):
         return str(v.get("value", ""))
     return str(v) if v is not None else ""
+
+
+_enum_option_labels: dict[str, dict[str, str]] | None = None
+
+
+def _enum_option_labels_for_field(field_code: str) -> dict[str, str]:
+    """Mapeia id da opção (str) -> label (dealFields v2)."""
+    global _enum_option_labels
+    if _enum_option_labels is None:
+        _enum_option_labels = {}
+        if not PIPEDRIVE_API_TOKEN:
+            return {}
+        cursor = None
+        while True:
+            params: dict = {"limit": 500}
+            if cursor:
+                params["cursor"] = cursor
+            response = requests.get(
+                "https://api.pipedrive.com/api/v2/dealFields",
+                headers={"x-api-token": PIPEDRIVE_API_TOKEN},
+                params=params,
+                timeout=60,
+            )
+            try:
+                response.raise_for_status()
+            except requests.HTTPError:
+                break
+            body = response.json()
+            for field in body.get("data") or []:
+                code = str(field.get("field_code") or "")
+                if not code or not field.get("options"):
+                    continue
+                _enum_option_labels[code] = {
+                    str(opt.get("id")): str(opt.get("label") or "").strip()
+                    for opt in field.get("options") or []
+                    if opt.get("id") is not None
+                }
+            cursor = (body.get("additional_data") or {}).get("next_cursor")
+            if not cursor:
+                break
+    return _enum_option_labels.get(field_code, {})
+
+
+def get_enum_label(deal_data: dict, field_code: str) -> str:
+    """Rótulo de campo enum (Sub Centro etc.) — catálogo Plune usa o label."""
+    raw = get_custom_fields(deal_data).get(field_code)
+    if isinstance(raw, dict):
+        return str(raw.get("label") or raw.get("name") or "").strip()
+    if raw is None or raw == "":
+        return ""
+    opt_id = str(raw).strip()
+    return _enum_option_labels_for_field(field_code).get(opt_id, opt_id)
 
 
 def get_filial_chaves(deal_data: dict) -> tuple[str, str]:

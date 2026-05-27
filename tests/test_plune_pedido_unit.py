@@ -14,6 +14,7 @@ from core.plune_pedido import (
     _anexar_documentos_pedido_criado,
     _descricao_pedido_plune,
     _criar_pedido_plune_tipo,
+    _montar_observacoes_pedido,
     _montar_query_insert_pedido,
     _ordenar_resultados_por_tipo,
     _pedido_integracao_tipo,
@@ -26,6 +27,8 @@ from core.pipedrive_fields import (
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_NUMERO_CONTRATO_P1,
     FIELD_NUMERO_CONTRATO_P2,
+    FIELD_OBSERVACOES_DETALHES,
+    FIELD_PERCENTUAL_EXITO,
     FIELD_VALOR_IMPLANTACAO,
     FIELD_VALOR_MENSAL,
 )
@@ -59,7 +62,7 @@ def _parceiro_minimo():
 
 
 class TestDescricaoPedido:
-    def test_implantacao_com_sufixo(self):
+    def test_implantacao_apenas_codigo_contrato(self):
         deal = {
             "id": 746,
             "custom_fields": {
@@ -69,10 +72,10 @@ class TestDescricaoPedido:
         }
         assert (
             _descricao_pedido_plune(deal, TIPO_PEDIDO_IMPLANTACAO)
-            == "Nome do contrato -> CGRc123i456n1r0a26 IMPLANTAÇÃO"
+            == "CGRc123i456n1r0a26"
         )
 
-    def test_recorrente_sem_sufixo(self):
+    def test_recorrente_apenas_codigo_contrato(self):
         deal = {
             "id": 746,
             "custom_fields": {
@@ -82,7 +85,7 @@ class TestDescricaoPedido:
         }
         assert (
             _descricao_pedido_plune(deal, TIPO_PEDIDO_RECORRENTE)
-            == "Nome do contrato -> CGRc123i456n1r0a26"
+            == "CGRc123i456n1r0a26"
         )
 
 
@@ -123,6 +126,7 @@ class TestMontarQueryInsertPedido:
         assert q_impl["Venda.Pedido.Serie"] == "1"
         assert q_impl["Venda.Pedido.ModeloId"] == "01"
         assert q_impl["Venda.Pedido.TipoContratoId"] == "49"
+        assert q_impl["Venda.Pedido.Aprovado"] == "0"
 
         q_rec = _parametros_query(
             _montar_query_insert_pedido(deal, parceiro, TIPO_PEDIDO_RECORRENTE)
@@ -131,7 +135,52 @@ class TestMontarQueryInsertPedido:
         assert q_rec["Venda.Pedido.ValorComissao"] == "9.468,00"
         assert q_rec["Venda.Pedido.PercentualComissao"] == "7"
         assert q_rec["Venda.Pedido.Serie"] == "1"
+        assert q_rec["Venda.Pedido.Aprovado"] == "0"
 
+class TestObservacoesPedido:
+    def test_observacoes_detalhes_pipe_vai_para_observacao(self):
+        deal = {
+            "id": 746,
+            "title": "Biview",
+            "custom_fields": {
+                FIELD_VALOR_MENSAL: "789",
+                FIELD_VALOR_IMPLANTACAO: "7000",
+                FIELD_NUMERO_CONTRATO_P1: "123",
+                FIELD_NUMERO_CONTRATO_P2: "456",
+                FIELD_GESTAO_USINA_FOTOVOLTAICA: 7,
+                FIELD_OBSERVACOES_DETALHES: "Texto livre do Pipedrive",
+            },
+        }
+        out = _montar_observacoes_pedido(deal, TIPO_PEDIDO_RECORRENTE)
+        assert out["Observacao"].startswith("Texto livre do Pipedrive")
+
+    @patch("core.plune_pedido.get_enum_label")
+    def test_exito_gebras_vem_do_pipedrive(self, mock_enum):
+        mock_enum.side_effect = lambda deal, field: (
+            "15%" if field == FIELD_PERCENTUAL_EXITO else ""
+        )
+        deal = {
+            "id": 746,
+            "title": "Biview",
+            "custom_fields": {FIELD_VALOR_MENSAL: "789"},
+        }
+        out = _montar_observacoes_pedido(deal, TIPO_PEDIDO_RECORRENTE)
+        assert "ÊXITO GEBRAS: 15%" in out["Observacao"]
+        assert "ÊXITO GEBRAS: 20%" not in out["Observacao"]
+
+    def test_sem_observacoes_detalhes_sem_fallback_servico(self):
+        deal = {
+            "id": 746,
+            "title": "Biview",
+            "custom_fields": {
+                FIELD_VALOR_MENSAL: "789",
+                FIELD_GESTAO_USINA_FOTOVOLTAICA: 7,
+            },
+        }
+        out = _montar_observacoes_pedido(deal, TIPO_PEDIDO_RECORRENTE)
+        assert "SERVIÇO" not in out["Observacao"]
+        assert "Biview: SOLE" not in out["Observacao"]
+        assert out["Observacao"].startswith("MENSALIDADE:")
 
 class TestHelpers:
     def test_pedido_integracao(self):
@@ -233,6 +282,7 @@ class TestCriarPedidoPluneTipo:
 
 
 class TestCriarPedidoPluneParalelo:
+    @patch("core.plune_pedido.vincular_pedidos_plune_implantacao_recorrente")
     @patch("core.plune_pedido.marcar_pedido_criado")
     @patch("core.plune_pedido.CacheAnexosDeal")
     @patch("core.plune_pedido._criar_pedido_plune_tipo")
@@ -247,6 +297,7 @@ class TestCriarPedidoPluneParalelo:
         mock_criar_tipo,
         mock_cache_cls,
         mock_marcar,
+        _vincular,
         deal_minimo,
         parceiro_minimo,
     ):

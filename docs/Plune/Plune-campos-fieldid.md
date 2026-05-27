@@ -162,7 +162,7 @@ No Plune, o identificador de campo na API é o **FieldId** no formato `Schema.Ta
 | Integração \| Id do Pedido | `PedidoIdMagento` | `Venda.Pedido.PedidoIdMagento` | varchar(32) | Não |  |
 | Informações que faltam para encerrar o pedido Inconsistências | `PedidoInconsistencias` | `Venda.Pedido.PedidoInconsistencias` | text() | Não |  |
 | Integração \| Pedido Integração | `PedidoIntegracao` | `Venda.Pedido.PedidoIntegracao` | varchar(200) | Não | Insert + idempotência Browse |
-| Detalhes \| Outros Pedido Original | `PedidoOriginal` | `Venda.Pedido.PedidoOriginal` | int4(21) [Venda.Pedido] Pedido | Não |  |
+| Detalhes \| Outros Pedido Original | `PedidoOriginal` | `Venda.Pedido.PedidoOriginal` | int4(21) [Venda.Pedido] Pedido | Não | Update pós-Insert (vínculo implantação ↔ recorrente) |
 | Comissão \| Percentual da Comissão | `PercentualComissao` | `Venda.Pedido.PercentualComissao` | Ultra::Percent(22,8) | Não | Insert (UCs Pipedrive / implantação) |
 | Impostos \| PIS Base de cálculo | `PISBase` | `Venda.Pedido.PISBase` | Ultra::Money(15,2) | Não |  |
 | Impostos \| PIS - Substituição Tributaria+ Valor | `PISSTValor` | `Venda.Pedido.PISSTValor` | Ultra::Money(15,2) | Não |  |

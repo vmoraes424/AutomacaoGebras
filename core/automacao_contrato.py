@@ -62,7 +62,9 @@ from core.pipedrive_fields import (
     FIELD_GESTAO_ACL,
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_INDICADORES_QUALIDADE,
+    FIELD_INSCRICAO_ESTADUAL,
     FIELD_NOME_CLIENTE,
+    FIELD_PERCENTUAL_EXITO,
     FIELD_NUMERO_CONTRATO_P1,
     FIELD_NUMERO_CONTRATO_P2,
     FIELD_QTD_SOLE,
@@ -73,6 +75,7 @@ from core.pipedrive_fields import (
     formatar_data_hora_brasilia,
     formatar_data_ptbr,
     formatar_quantidade_uc,
+    get_enum_label,
     get_val,
 )
 
@@ -401,9 +404,19 @@ class ClicksignClient:
             )
             if not r_doc.ok:
                 continue
-            attrs = r_doc.json().get("data", {}).get("attributes", {}) or {}
+            data = r_doc.json().get("data", {}) or {}
+            attrs = data.get("attributes", {}) or {}
             downloads = attrs.get("downloads") or {}
             url = downloads.get("signed_file_url") or downloads.get("signed_file")
+            if not url:
+                # Em alguns tenants Clicksign v3 o link vem em data.links.files.signed
+                links = data.get("links", {}) or {}
+                files = links.get("files", {}) or {}
+                url = (
+                    files.get("signed")
+                    or files.get("signed_file_url")
+                    or files.get("signed_file")
+                )
             if not url:
                 continue
             if str(url).startswith("/"):
@@ -474,6 +487,13 @@ def fill_contract(deal_data, *, numeros_pedidos: dict[str, str] | None = None):
     p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2)
     qtd_sole = get_val(deal_data, FIELD_QTD_SOLE)
     sole_consultoria = get_val(deal_data, FIELD_QUALIDADE_ENERGIA)
+    qualidade_energia_uc = get_val(deal_data, FIELD_INDICADORES_QUALIDADE)
+    gestao_acl = get_val(deal_data, FIELD_GESTAO_ACL)
+    gestao_usina = get_val(deal_data, FIELD_GESTAO_USINA_FOTOVOLTAICA)
+    percentual_exito = get_enum_label(deal_data, FIELD_PERCENTUAL_EXITO).strip()
+    if not percentual_exito:
+        percentual_exito = "A definir"
+    inscricao_estadual = get_val(deal_data, FIELD_INSCRICAO_ESTADUAL).strip()
 
     raw_dt_implantacao = get_val(deal_data, FIELD_DATA_IMPLANTACAO)
     dt_implantacao = (
@@ -528,6 +548,11 @@ def fill_contract(deal_data, *, numeros_pedidos: dict[str, str] | None = None):
         "documento": documento,
         "sole_web": formatar_quantidade_uc(qtd_sole),
         "sole_consultoria": formatar_quantidade_uc(sole_consultoria),
+        "gestao_acl": formatar_quantidade_uc(gestao_acl),
+        "gestao_usina_fotovoltaica": formatar_quantidade_uc(gestao_usina),
+        "qualidade_energia": formatar_quantidade_uc(qualidade_energia_uc),
+        "percentual_exito": percentual_exito,
+        "inscricao_estadual": inscricao_estadual,
         "valor_mensal": formatar_moeda(get_val(deal_data, FIELD_VALOR_MENSAL)),
         "valor_implantacao": formatar_moeda(
             get_val(deal_data, FIELD_VALOR_IMPLANTACAO)
@@ -536,11 +561,6 @@ def fill_contract(deal_data, *, numeros_pedidos: dict[str, str] | None = None):
         "data_inicio": formatar_data_ptbr(
             deal_data.get("won_time") or deal_data.get("add_time")
         ),
-        # Pipedrive: ffb2d5a = "Gestão da Qualidade de Energia"; c0a23912 = "Sole Consultoria"
-        "indicadores_qualidade": get_val(deal_data, FIELD_INDICADORES_QUALIDADE),
-        "qualidade_energia": get_val(deal_data, FIELD_INDICADORES_QUALIDADE),
-        "gestao_acl": get_val(deal_data, FIELD_GESTAO_ACL),
-        "gestao_usina_fotovoltaica": get_val(deal_data, FIELD_GESTAO_USINA_FOTOVOLTAICA),
         "data_pagamento_implantacao": dt_implantacao,
         "data_pagamento_primeira_cobranca": dt_primeira_cobranca,
         "contato_gestor": get_val(deal_data, FIELD_CONTATO_GESTOR),
@@ -900,7 +920,7 @@ def main():
         )
     if DEV_PLUNE_APROVADO_NAO:
         print(
-            "[*] DEV_PLUNE_APROVADO_NAO=1 — pedidos Plune criados com Aprovado=Não; aprovação pós-assinatura desligada."
+            "[*] DEV_PLUNE_APROVADO_NAO=1 — aprovação pós-assinatura desligada (os pedidos já nascem com Aprovado=Não)."
         )
     if DEV_PULAR_CLICKSIGN:
         print(
