@@ -56,6 +56,9 @@ CAMPOS_CONTRATO_OPCIONAIS = frozenset(
         FIELD_DATA_IMPLANTACAO,
         FIELD_VALOR_IMPLANTACAO,
         FIELD_OBSERVACOES_DETALHES,
+        # Cliente novo pode ainda não existir no HUB (sem códigos).
+        FIELD_NUMERO_CONTRATO_P1,
+        FIELD_NUMERO_CONTRATO_P2,
     }
 )
 
@@ -68,8 +71,6 @@ CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
     ("Município/Estado", FIELD_CIDADE, "text"),
     ("CPF/CNPJ", FIELD_DOCUMENTO, "documento"),
     ("Inscrição Estadual", FIELD_INSCRICAO_ESTADUAL, "text"),
-    ("Código da Instalação", FIELD_NUMERO_CONTRATO_P1, "text"),
-    ("Código Cliente", FIELD_NUMERO_CONTRATO_P2, "text"),
     ("SOLE Web", FIELD_QTD_SOLE, "uc"),
     ("Sole Consultoria", FIELD_QUALIDADE_ENERGIA, "uc"),
     ("Gestão ACL - Mercado Livre de Energia", FIELD_GESTAO_ACL, "uc"),
@@ -216,8 +217,14 @@ def get_documento(deal_data: dict) -> str:
 
 
 def get_numero_contrato(deal_data: dict) -> str:
-    p1 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
-    p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2)
+    """Monta o identificador do contrato; sem códigos HUB usa o deal_id."""
+    p1 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P1).strip()
+    p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2).strip()
+    if p1 and p2:
+        return f"CGRc{p1}i{p2}n1r0a26"
+    deal_id = str(deal_data.get("id", "")).strip() or "0"
+    p1 = p1 or deal_id
+    p2 = p2 or deal_id
     return f"CGRc{p1}i{p2}n1r0a26"
 
 

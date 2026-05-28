@@ -971,15 +971,7 @@ def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
 
 
 def _descricao_pedido_plune(deal: dict, tipo_pedido: str) -> str:
-    """Geral | Descrição: somente código do contrato (CGRc...)."""
-    deal_id = str(deal.get("id", ""))
-    p1 = get_val(deal, FIELD_NUMERO_CONTRATO_P1).strip()
-    p2 = get_val(deal, FIELD_NUMERO_CONTRATO_P2).strip()
-    if not p1 or not p2:
-        raise PluneError(
-            f"Deal {deal_id}: campos de número do contrato (P1/P2) ausentes no Pipedrive "
-            "— necessários para Venda.Pedido.Descricao."
-        )
+    """Geral | Descrição: código do contrato (CGRc...); sem HUB usa deal_id."""
     return get_numero_contrato(deal)[:128]
 
 

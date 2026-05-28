@@ -69,8 +69,6 @@ from core.pipedrive_fields import (
     FIELD_INSCRICAO_ESTADUAL,
     FIELD_NOME_CLIENTE,
     FIELD_PERCENTUAL_EXITO,
-    FIELD_NUMERO_CONTRATO_P1,
-    FIELD_NUMERO_CONTRATO_P2,
     FIELD_QTD_SOLE,
     FIELD_QUALIDADE_ENERGIA,
     FIELD_VALOR_IMPLANTACAO,
@@ -80,6 +78,7 @@ from core.pipedrive_fields import (
     formatar_data_ptbr,
     formatar_quantidade_uc,
     get_enum_label,
+    get_numero_contrato,
     get_val,
 )
 from core.pipedrive_files import baixar_docx_contrato_padrao_deal
@@ -522,8 +521,7 @@ def fill_contract(
         print(f"[!] Erro ao abrir docx: {e}")
         return None
 
-    p1 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
-    p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2)
+    numero_contrato = get_numero_contrato(deal_data)
     qtd_sole = get_val(deal_data, FIELD_QTD_SOLE)
     sole_consultoria = get_val(deal_data, FIELD_QUALIDADE_ENERGIA)
     qualidade_energia_uc = get_val(deal_data, FIELD_INDICADORES_QUALIDADE)
@@ -579,7 +577,7 @@ def fill_contract(
                 )
 
     contexto = {
-        "numero_contrato": f"CGRc{p1}i{p2}n1r0a26",
+        "numero_contrato": numero_contrato,
         "numeros_pedidos": formatar_linha_pedidos_plune_contrato(numeros_pedidos),
         "nome_cliente": nome_cliente,
         "endereco": endereco,
