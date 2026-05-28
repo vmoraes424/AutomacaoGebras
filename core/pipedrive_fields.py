@@ -179,13 +179,10 @@ def resolver_branch_id(deal_data: dict) -> str:
     branch_id = resolve_filial_branch(label, opt_id)
     if branch_id:
         return branch_id
-    fallback = default_branch_id()
-    if fallback:
-        return fallback
     raise ValueError(
         "Filial do deal não mapeada para BranchId no Plune. "
         f"Valor no Pipedrive: {get_filial_label(deal_data) or opt_id!r}. "
-        "Cadastre em pipedrive_filial (MySQL) ou defina default_branch_id em app_meta."
+        "Cadastre em pipedrive_filial (MySQL)."
     )
 
 

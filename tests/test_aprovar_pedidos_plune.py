@@ -14,7 +14,6 @@ from core.plune_pedido import (
 
 
 class TestAprovarPedidosPlune:
-    @patch("core.plune_pedido.DEV_PLUNE_APROVADO_NAO", False)
     @patch("core.plune_pedido._aprovar_pedido_plune_tipo")
     @patch("core.plune_pedido.CacheAnexosDeal")
     def test_paralelo_e_ordenacao(self, mock_cache_cls, mock_aprovar):
@@ -43,7 +42,6 @@ class TestAprovarPedidosPlune:
         if len(inicios) == 2:
             assert abs(inicios[0][1] - inicios[1][1]) < 0.04
 
-    @patch("core.plune_pedido.DEV_PLUNE_APROVADO_NAO", False)
     @patch("core.plune_pedido._aprovar_pedido_plune_tipo")
     @patch("core.plune_pedido.CacheAnexosDeal")
     def test_status_pending_contract_quando_pdf_assinado_indisponivel(

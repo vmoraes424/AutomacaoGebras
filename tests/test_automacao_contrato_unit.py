@@ -74,3 +74,16 @@ class TestImportsModuloPrincipal:
         import core.automacao_contrato  # noqa: F401
         import core.plune_pedido  # noqa: F401
         import core.pedido_anexos  # noqa: F401
+
+
+class TestCancelEnvelope:
+    def test_cancel_envelope_faz_patch(self, cliente):
+        with patch.object(cliente, "_request") as mock_req:
+            resp = MagicMock(ok=True, status_code=200)
+            mock_req.return_value = resp
+            cliente.cancel_envelope("env-123")
+            args, kwargs = mock_req.call_args
+            assert args[0] == "PATCH"
+            assert "/envelopes/env-123" in args[1]
+            payload = kwargs.get("json") or {}
+            assert payload["data"]["attributes"]["status"] == "canceled"

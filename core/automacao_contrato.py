@@ -11,6 +11,7 @@ import os
 import traceback
 import requests
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from docxtpl import DocxTemplate
 
@@ -25,12 +26,13 @@ from core.config import (
     PASTA_SAIDA,
     PIPEDRIVE_API_TOKEN,
     CORTE_TEMPORAL_GRACE_MINUTOS,
-    DEV_PLUNE_APROVADO_NAO,
     TESTE_PLUNE_SEM_ASSINATURA,
 )
 from core.database import carregar_deals_processados, salvar_deal_processado
 from core.envelope_state import (
     carregar_pedidos_plune_criados,
+    buscar_por_deal_id,
+    limpar_template_local_envelope,
     listar_aguardando_pedido_plune,
     marcar_pedidos_aprovados,
     salvar_envelope_pendente,
@@ -45,11 +47,13 @@ from core.plune_pedido import (
     formatar_linha_pedidos_plune_contrato,
     obter_numeros_pedidos_plune_deal,
 )
+from core.pipedrive_stages import garantir_deal_em_etapa_negociacao
 from core.pipedrive_validations import (
     DealValidationError,
     reabrir_deal_com_erros,
     validar_deal_para_automacao,
 )
+from core.gebras_defaults import PIPEDRIVE_STAGE_NEGOCIACAO_NOME
 from core.pipedrive_fields import (
     FIELD_CONTATO_CONTRATANTE,
     FIELD_CONTATO_FINANCEIRO,
@@ -78,6 +82,7 @@ from core.pipedrive_fields import (
     get_enum_label,
     get_val,
 )
+from core.pipedrive_files import baixar_docx_contrato_padrao_deal
 
 # --- CONFIGURAÇÕES (ver config.py) ---
 API_TOKEN = PIPEDRIVE_API_TOKEN
@@ -327,6 +332,34 @@ class ClicksignClient:
         )
         self._raise(r, "activate_envelope")
 
+    def cancel_envelope(self, envelope_id: str) -> None:
+        """
+        Cancela um envelope em andamento.
+        Regra da automação: ao regenerar (re-won antes da última assinatura),
+        o envelope antigo deve ser invalidado para evitar aprovação por engano.
+        """
+        payload = {
+            "data": {
+                "id": envelope_id,
+                "type": "envelopes",
+                "attributes": {"status": "canceled"},
+            }
+        }
+        r = self._request(
+            "PATCH", f"/envelopes/{envelope_id}", "cancel_envelope", json=payload
+        )
+        # Não levanta em falha: pode já estar fechado/cancelado; seguimos com a regeneração.
+        if not r.ok:
+            try:
+                body = r.json()
+            except Exception:
+                body = r.text
+            print(
+                f"[!] Clicksign: falha ao cancelar envelope {envelope_id} "
+                f"(HTTP {r.status_code}): {body}",
+                flush=True,
+            )
+
     def notify_signer_manual(self, envelope_id, signer_id):
         payload = {
             "data": {
@@ -473,12 +506,18 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: 
 
 
 # ---------- GERAÇÃO DO CONTRATO ----------
-def fill_contract(deal_data, *, numeros_pedidos: dict[str, str] | None = None):
-    if not os.path.exists(MODELO_DOCX):
-        print(f"[!] Erro: Modelo '{MODELO_DOCX}' não encontrado.")
+def fill_contract(
+    deal_data,
+    *,
+    numeros_pedidos: dict[str, str] | None = None,
+    template_path: str | None = None,
+):
+    modelo = template_path or MODELO_DOCX
+    if not os.path.exists(modelo):
+        print(f"[!] Erro: Modelo '{modelo}' não encontrado.")
         return None
     try:
-        doc = DocxTemplate(MODELO_DOCX)
+        doc = DocxTemplate(modelo)
     except Exception as e:
         print(f"[!] Erro ao abrir docx: {e}")
         return None
@@ -574,6 +613,22 @@ def fill_contract(deal_data, *, numeros_pedidos: dict[str, str] | None = None):
     doc.save(nome_saida)
     print(f"[v] Contrato Gerado: {nome_saida}")
     return nome_saida
+
+
+def _salvar_template_deal_local(
+    *, deal_id: str, won_time: str, file_id: int, nome: str, conteudo: bytes
+) -> str:
+    pasta = os.path.join("runtime", "templates")
+    os.makedirs(pasta, exist_ok=True)
+    sufixo = hashlib.sha1(str(won_time).encode("utf-8")).hexdigest()[:10]
+    base = os.path.splitext(os.path.basename(nome or "contrato_padrao.docx"))[0]
+    safe_base = base.replace("/", "-").replace("\\", "-").strip() or "contrato_padrao"
+    caminho = os.path.join(
+        pasta, f"template_{safe_base}_{deal_id}_{file_id}_{sufixo}.docx"
+    )
+    with open(caminho, "wb") as f:
+        f.write(conteudo)
+    return caminho
 
 
 # ---------- NOVO FLUXO: POLLING DA API ----------
@@ -722,6 +777,36 @@ def processar_deals_pendentes():
 
         try:
             try:
+                if garantir_deal_em_etapa_negociacao(deal):
+                    print(
+                        f"    -> Deal {deal_id} movido para etapa "
+                        f"«{PIPEDRIVE_STAGE_NEGOCIACAO_NOME}» no Pipedrive.",
+                        flush=True,
+                    )
+            except RuntimeError as exc:
+                print(
+                    f"[!] Deal {deal_id}: falha ao mover para "
+                    f"«{PIPEDRIVE_STAGE_NEGOCIACAO_NOME}»: {exc}",
+                    flush=True,
+                )
+                continue
+
+            # Regra de regeneração:
+            # - Se pedidos Plune já estiverem aprovados, bloqueia qualquer novo ganho.
+            # - Se houver envelope pendente (não aprovado), é regeneração: cancela envelope antigo,
+            #   atualiza pedidos existentes e cria novo contrato/envelope.
+            registro = buscar_por_deal_id(deal_id)
+            if registro and registro.get("pedidos_plune_aprovados"):
+                print(
+                    f"[*] Deal {deal_id}: ignorado — pedidos Plune já aprovados "
+                    "(regra: sem regeneração após última assinatura).",
+                    flush=True,
+                )
+                salvar_deal_processado(deal_id, won_time_str)
+                algum_processado = True
+                continue
+
+            try:
                 validar_deal_para_automacao(deal)
             except DealValidationError as validation_error:
                 print(
@@ -739,36 +824,109 @@ def processar_deals_pendentes():
                 )
                 continue
 
-            print(
-                f"    -> Criando pedidos no Plune (antes do contrato)...",
-                flush=True,
-            )
+            # Plune: criar ou atualizar pedidos antes do contrato
             numeros_pedidos: dict[str, str] = {}
-            try:
-                result_plune = criar_pedido_plune(deal_id, anexar_contrato=False)
-                log_resultado_plune(deal_id, result_plune)
-                numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
-            except DealValidationError as validation_error:
+            if registro:
                 print(
-                    f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
+                    f"    -> Regeneração: atualizando pedidos no Plune (deal {deal_id})...",
                     flush=True,
                 )
-                for erro in validation_error.mensagens:
-                    print(f"    - {erro}", flush=True)
-                reabrir_deal_com_erros(deal_id, validation_error.mensagens)
-                algum_processado = True
-                continue
-            except PluneError as exc:
+                try:
+                    from core.plune_pedido import atualizar_pedidos_plune
+
+                    result_plune = atualizar_pedidos_plune(deal_id)
+                    log_resultado_plune(deal_id, result_plune)
+                    numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+                except DealValidationError as validation_error:
+                    print(
+                        f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
+                        flush=True,
+                    )
+                    for erro in validation_error.mensagens:
+                        print(f"    - {erro}", flush=True)
+                    reabrir_deal_com_erros(deal_id, validation_error.mensagens)
+                    algum_processado = True
+                    continue
+                except PluneError as exc:
+                    print(
+                        f"[!] Plune: FALHA ao atualizar pedidos (deal {deal_id}): {exc}",
+                        flush=True,
+                    )
+                    continue
+            else:
                 print(
-                    f"[!] Plune: FALHA ao criar pedidos antes do contrato (deal {deal_id}): {exc}",
+                    f"    -> Criando pedidos no Plune (antes do contrato)...",
                     flush=True,
                 )
-                continue
+                try:
+                    result_plune = criar_pedido_plune(deal_id, anexar_contrato=False)
+                    log_resultado_plune(deal_id, result_plune)
+                    # Se o MySQL local já marca o pedido como criado, mas o deal não tem
+                    # registro de envelope pendente (registro=None), tratamos como
+                    # regeneração e aplicamos atualização no Plune.
+                    pedidos = result_plune.get("pedidos") or []
+                    if any(
+                        (p.get("reason") == "already_in_local_state") for p in pedidos
+                    ):
+                        print(
+                            f"    -> Detectado pedido já criado localmente; atualizando pedidos no Plune (deal {deal_id})...",
+                            flush=True,
+                        )
+                        from core.plune_pedido import atualizar_pedidos_plune
+
+                        result_plune = atualizar_pedidos_plune(deal_id)
+                        log_resultado_plune(deal_id, result_plune)
+                    numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+                except DealValidationError as validation_error:
+                    print(
+                        f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
+                        flush=True,
+                    )
+                    for erro in validation_error.mensagens:
+                        print(f"    - {erro}", flush=True)
+                    reabrir_deal_com_erros(deal_id, validation_error.mensagens)
+                    algum_processado = True
+                    continue
+                except PluneError as exc:
+                    print(
+                        f"[!] Plune: FALHA ao criar pedidos antes do contrato (deal {deal_id}): {exc}",
+                        flush=True,
+                    )
+                    continue
 
             print(f"    -> Gerando contrato...", flush=True)
-            doc_path = fill_contract(deal, numeros_pedidos=numeros_pedidos)
-            if doc_path:
-                anexar_contrato_local_aos_pedidos_deal(deal_id)
+
+            template_path = None
+            template_file_id = None
+            try:
+                tpl = baixar_docx_contrato_padrao_deal(deal_id)
+                if tpl:
+                    conteudo_tpl, nome_tpl, file_id = tpl
+                    template_file_id = file_id
+                    template_path = _salvar_template_deal_local(
+                        deal_id=deal_id,
+                        won_time=won_time_str,
+                        file_id=file_id,
+                        nome=nome_tpl,
+                        conteudo=conteudo_tpl,
+                    )
+                    print(
+                        f"[*] Deal {deal_id}: usando template do Pipedrive "
+                        f"(file_id={file_id}, nome={nome_tpl!r}).",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(
+                    f"[!] Deal {deal_id}: falha ao baixar template contrato_padrao do Pipedrive "
+                    f"(seguindo com template local): {exc}",
+                    flush=True,
+                )
+
+            doc_path = fill_contract(
+                deal,
+                numeros_pedidos=numeros_pedidos,
+                template_path=template_path,
+            )
 
             sequence_dinamica = extrair_signatarios(deal)
 
@@ -795,11 +953,31 @@ def processar_deals_pendentes():
                     print(f"    -> Enviando para Clicksign...", flush=True)
                     envelope_name = f"Contrato Deal {deal_id} - {deal.get('title')}"
 
+                    # Regeneração: cancela envelope antigo antes de criar o novo.
+                    if registro and registro.get("envelope_id"):
+                        try:
+                            cs_tmp = ClicksignClient(
+                                CLICKSIGN_BASE_URL, CLICKSIGN_ACCESS_TOKEN
+                            )
+                            cs_tmp.cancel_envelope(str(registro["envelope_id"]))
+                        except Exception as exc:
+                            print(
+                                f"[!] Clicksign: falha ao tentar cancelar envelope antigo "
+                                f"{registro.get('envelope_id')}: {exc}",
+                                flush=True,
+                            )
+
                     envelope_id = clicksign_fire_and_forget(
                         doc_path, envelope_name, sequence_dinamica
                     )
 
-                    salvar_envelope_pendente(deal_id, envelope_id, envelope_name)
+                    salvar_envelope_pendente(
+                        deal_id,
+                        envelope_id,
+                        envelope_name,
+                        template_file_id=template_file_id,
+                        template_local_path=template_path,
+                    )
                     salvar_deal_processado(deal_id, won_time_str)
                     algum_processado = True
                     print(
@@ -884,6 +1062,18 @@ def processar_contratos_assinados():
             log_resultado_plune(deal_id, result)
             if result.get("status") in ("approved", "skipped"):
                 marcar_pedidos_aprovados(deal_id)
+                # Cleanup do template local usado para gerar o contrato (somente após anexar assinado).
+                try:
+                    path_tpl = str(record.get("template_local_path") or "").strip()
+                    if path_tpl and os.path.exists(path_tpl):
+                        os.remove(path_tpl)
+                    if path_tpl:
+                        limpar_template_local_envelope(deal_id)
+                except Exception as exc:
+                    print(
+                        f"[!] Deal {deal_id}: falha ao remover template local {record.get('template_local_path')!r}: {exc}",
+                        flush=True,
+                    )
         except PluneError as exc:
             print(
                 f"[!] Plune: falha ao aprovar pedidos (deal {deal_id}): {exc}",
@@ -917,10 +1107,6 @@ def main():
     if TESTE_PLUNE_SEM_ASSINATURA:
         print(
             "[*] MODO TESTE: pedido Plune logo após Clicksign (processar_contratos_assinados fica em silêncio de propósito)."
-        )
-    if DEV_PLUNE_APROVADO_NAO:
-        print(
-            "[*] DEV_PLUNE_APROVADO_NAO=1 — aprovação pós-assinatura desligada (os pedidos já nascem com Aprovado=Não)."
         )
     if DEV_PULAR_CLICKSIGN:
         print(

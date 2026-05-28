@@ -38,6 +38,8 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
         "parametro_contabil_implantacao": "1440",
         "pedido_serie": "1",
         "pedido_modelo_id": "01",
+        # Faturamento | Informações para NF Natureza da Operação sobre Serviço (FK Venda_Pedido_fkey_1307554999)
+        "natureza_operacao_servico_id": "2",
     },
     "790": {
         "label": "Iribarrem San Martin (ISM)",
@@ -46,11 +48,12 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
         "parametro_contabil_implantacao": "1436",
         "pedido_serie": "0",
         "pedido_modelo_id": "01",
+        "natureza_operacao_servico_id": "2",
     },
 }
-_SEED_DEFAULT_BRANCH_ID = "790"
+_SEED_DEFAULT_BRANCH_ID = "751"
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 8
 _initialized = False
 
 
@@ -168,7 +171,9 @@ def _init_schema(conn: DbConnection) -> None:
             created_at VARCHAR(64) NOT NULL,
             pedidos_plune_criados TINYINT(1) NOT NULL DEFAULT 0,
             pedidos_plune_aprovados TINYINT(1) NOT NULL DEFAULT 0,
-            pedido_plune_id VARCHAR(64) NULL
+            pedido_plune_id VARCHAR(64) NULL,
+            template_file_id VARCHAR(32) NULL,
+            template_local_path VARCHAR(1024) NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -185,7 +190,8 @@ def _init_schema(conn: DbConnection) -> None:
             parametro_contabil_recorrente VARCHAR(32) NOT NULL,
             parametro_contabil_implantacao VARCHAR(32) NOT NULL,
             pedido_serie VARCHAR(8) NOT NULL DEFAULT '0',
-            pedido_modelo_id VARCHAR(8) NOT NULL DEFAULT '01'
+            pedido_modelo_id VARCHAR(8) NOT NULL DEFAULT '01',
+            natureza_operacao_servico_id VARCHAR(32) NOT NULL DEFAULT '2'
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -297,6 +303,30 @@ def _migrate_schema(conn: DbConnection) -> None:
             # 1091 = Can't DROP ... check that column/key exists
             if exc.args[0] != 1091:
                 raise
+    if version < 7:
+        # Template do contrato por deal (Pipedrive file_id) e caminho local temporário.
+        for sql in (
+            "ALTER TABLE envelopes_pending ADD COLUMN template_file_id VARCHAR(32) NULL",
+            "ALTER TABLE envelopes_pending ADD COLUMN template_local_path VARCHAR(1024) NULL",
+        ):
+            try:
+                conn.execute(sql)
+            except pymysql.err.OperationalError as exc:
+                # 1060 = Duplicate column name
+                if exc.args[0] != 1060:
+                    raise
+    if version < 8:
+        # Faturamento: Natureza da Operação sobre Serviço (por filial)
+        try:
+            conn.execute(
+                """
+                ALTER TABLE branch_config
+                ADD COLUMN natureza_operacao_servico_id VARCHAR(32) NOT NULL DEFAULT '2'
+                """
+            )
+        except pymysql.err.OperationalError as exc:
+            if exc.args[0] != 1060:
+                raise
     conn.execute(
         "UPDATE app_meta SET value = %s WHERE `key` = 'schema_version'",
         (str(_SCHEMA_VERSION),),
@@ -321,8 +351,8 @@ def _seed_catalogo_inicial(conn: DbConnection) -> None:
                 INSERT INTO branch_config (
                     branch_id, label, subcentro_custo_id,
                     parametro_contabil_recorrente, parametro_contabil_implantacao,
-                    pedido_serie, pedido_modelo_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    pedido_serie, pedido_modelo_id, natureza_operacao_servico_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     str(branch_id),
@@ -332,6 +362,7 @@ def _seed_catalogo_inicial(conn: DbConnection) -> None:
                     cfg["parametro_contabil_implantacao"],
                     cfg.get("pedido_serie", PLUNE_PEDIDO_SERIE),
                     cfg.get("pedido_modelo_id", PLUNE_PEDIDO_MODELO_ID),
+                    cfg.get("natureza_operacao_servico_id", "2"),
                 ),
             )
 
@@ -406,26 +437,29 @@ def upsert_branch_config(
     parametro_implantacao: str,
     pedido_serie: str | None = None,
     pedido_modelo_id: str | None = None,
+    natureza_operacao_servico_id: str | None = None,
 ) -> None:
     serie = str(pedido_serie if pedido_serie is not None else PLUNE_PEDIDO_SERIE)
     modelo = str(
         pedido_modelo_id if pedido_modelo_id is not None else PLUNE_PEDIDO_MODELO_ID
     )
+    natureza = str(natureza_operacao_servico_id if natureza_operacao_servico_id is not None else "2")
     with db_conn() as conn:
         conn.execute(
             """
             INSERT INTO branch_config (
                 branch_id, label, subcentro_custo_id,
                 parametro_contabil_recorrente, parametro_contabil_implantacao,
-                pedido_serie, pedido_modelo_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                pedido_serie, pedido_modelo_id, natureza_operacao_servico_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 label = VALUES(label),
                 subcentro_custo_id = VALUES(subcentro_custo_id),
                 parametro_contabil_recorrente = VALUES(parametro_contabil_recorrente),
                 parametro_contabil_implantacao = VALUES(parametro_contabil_implantacao),
                 pedido_serie = VALUES(pedido_serie),
-                pedido_modelo_id = VALUES(pedido_modelo_id)
+                pedido_modelo_id = VALUES(pedido_modelo_id),
+                natureza_operacao_servico_id = VALUES(natureza_operacao_servico_id)
             """,
             (
                 str(branch_id),
@@ -435,6 +469,7 @@ def upsert_branch_config(
                 parametro_implantacao,
                 serie,
                 modelo,
+                natureza,
             ),
         )
 
@@ -520,7 +555,8 @@ def _load_envelopes(conn: DbConnection) -> list[dict]:
     rows = conn.execute(
         """
         SELECT deal_id, envelope_id, envelope_name, created_at,
-               pedidos_plune_criados, pedidos_plune_aprovados, pedido_plune_id
+               pedidos_plune_criados, pedidos_plune_aprovados, pedido_plune_id,
+               template_file_id, template_local_path
         FROM envelopes_pending
         ORDER BY created_at
         """
@@ -536,22 +572,53 @@ def _load_envelopes(conn: DbConnection) -> list[dict]:
             "pedidos_plune_aprovados": bool(r["pedidos_plune_aprovados"]),
             "pedido_plune_aprovado": bool(r["pedidos_plune_aprovados"]),
             "pedido_plune_id": r["pedido_plune_id"],
+            "template_file_id": r.get("template_file_id"),
+            "template_local_path": r.get("template_local_path"),
         }
         for r in rows
     ]
 
 
-def salvar_envelope_pendente(deal_id: str, envelope_id: str, envelope_name: str) -> None:
+def salvar_envelope_pendente(
+    deal_id: str,
+    envelope_id: str,
+    envelope_name: str,
+    *,
+    template_file_id: str | int | None = None,
+    template_local_path: str | None = None,
+) -> None:
     deal_id = str(deal_id)
     with db_conn() as conn:
         conn.execute(
             """
             REPLACE INTO envelopes_pending (
                 deal_id, envelope_id, envelope_name, created_at,
-                pedidos_plune_criados, pedidos_plune_aprovados, pedido_plune_id
-            ) VALUES (%s, %s, %s, %s, 0, 0, NULL)
+                pedidos_plune_criados, pedidos_plune_aprovados, pedido_plune_id,
+                template_file_id, template_local_path
+            ) VALUES (%s, %s, %s, %s, 0, 0, NULL, %s, %s)
             """,
-            (deal_id, envelope_id, envelope_name, _utc_now()),
+            (
+                deal_id,
+                envelope_id,
+                envelope_name,
+                _utc_now(),
+                (str(template_file_id) if template_file_id is not None else None),
+                (str(template_local_path) if template_local_path else None),
+            ),
+        )
+
+
+def limpar_template_local_envelope(deal_id: str) -> None:
+    """Zera campos de template do envelope pendente após cleanup local."""
+    deal_id = str(deal_id)
+    with db_conn() as conn:
+        conn.execute(
+            """
+            UPDATE envelopes_pending
+            SET template_local_path = NULL
+            WHERE deal_id = %s
+            """,
+            (deal_id,),
         )
 
 
@@ -689,12 +756,14 @@ def branch_config(branch_id: str) -> dict | None:
     maps = maps_por_branch(branch_id)
     serie = row.get("pedido_serie") or PLUNE_PEDIDO_SERIE
     modelo = row.get("pedido_modelo_id") or PLUNE_PEDIDO_MODELO_ID
+    natureza = row.get("natureza_operacao_servico_id") or "2"
     return {
         "subcentro_custo_id": row["subcentro_custo_id"],
         "parametro_recorrente": row["parametro_contabil_recorrente"],
         "parametro_implantacao": row["parametro_contabil_implantacao"],
         "pedido_serie": str(serie),
         "pedido_modelo_id": str(modelo),
+        "natureza_operacao_servico_id": str(natureza),
         "regional_map": maps["regional_map"],
         "subcentro3_map": maps["subcentro3_map"],
     }

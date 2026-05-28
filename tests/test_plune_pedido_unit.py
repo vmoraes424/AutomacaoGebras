@@ -20,6 +20,7 @@ from core.plune_pedido import (
     _pedido_integracao_tipo,
     _pedidos_plune_deal_resolvidos,
     _valor_implantacao_valido_para_pedido,
+    atualizar_pedidos_plune,
     criar_pedido_plune,
 )
 from core.pedido_anexos import CacheAnexosDeal
@@ -210,19 +211,15 @@ class TestHelpers:
 
 
 class TestAnexarDocumentosParalelo:
-    @patch("core.plune_pedido.anexar_contrato_pedido")
     @patch("core.plune_pedido.anexar_proposta_pedido")
-    def test_chama_proposta_e_contrato(self, mock_prop, mock_contr):
+    def test_chama_somente_proposta_na_criacao(self, mock_prop):
         mock_prop.return_value = {"anexo_id": "1"}
-        mock_contr.return_value = {"anexo_id": "2"}
         cache = CacheAnexosDeal("746")
         anexos = _anexar_documentos_pedido_criado(
             "746", "6742", "751", cache=cache, anexar_contrato_dev=True
         )
         assert anexos["proposta"]["anexo_id"] == "1"
-        assert anexos["contrato"]["anexo_id"] == "2"
         mock_prop.assert_called_once()
-        mock_contr.assert_called_once()
 
 
 class TestCriarPedidoPluneTipo:
@@ -335,3 +332,76 @@ class TestCriarPedidoPluneParalelo:
         mock_deal.return_value = None
         with pytest.raises(PluneError, match="não encontrado"):
             criar_pedido_plune("999")
+
+
+class TestAtualizarPedidosPlune:
+    @patch("core.plune_pedido._plune_get")
+    @patch("core.plune_pedido._buscar_itens_pedido_plune")
+    @patch("core.plune_pedido._buscar_pedido_por_pedido_integracao")
+    @patch("core.plune_pedido.buscar_deal_por_id")
+    @patch("core.plune_pedido._resolver_ou_criar_parceiro")
+    @patch("core.plune_pedido._montar_params_pedido")
+    def test_atualiza_pedido_e_item_preco(
+        self,
+        mock_params,
+        mock_parceiro,
+        mock_deal,
+        mock_busca_pedido,
+        mock_itens,
+        mock_plune,
+        deal_minimo,
+        parceiro_minimo,
+    ):
+        mock_deal.return_value = deal_minimo
+        mock_parceiro.return_value = (parceiro_minimo, False)
+        # _montar_params_pedido devolve _valor_item_preco + campos que a automação controla
+        mock_params.return_value = {
+            "BranchId": "751",
+            "ClienteId": "999",
+            "Descricao": "CGRc123i456n1r0a26",
+            "StatusPedido": "31",
+            "Serie": "1",
+            "ModeloId": "01",
+            "TipoContratoId": "49",
+            "ParametroContabilId": "1077",
+            "BaseComissao": "1,00",
+            "PercentualComissao": "1",
+            "ValorComissao": "12,00",
+            "Observacao": "x",
+            "_valor_item_preco": "789,00",
+        }
+        mock_busca_pedido.return_value = {
+            "id": "9001",
+            "cliente_id": "999",
+            "branch_id": "751",
+            "aprovado": False,
+            "pedido_integracao": "746-implantacao",
+            "status_pedido": "31",
+        }
+        mock_itens.return_value = [
+            {
+                "id": "1",
+                "pedido_id": "9001",
+                "cliente_id": "999",
+                "branch_id": "751",
+                "produto_id": "5584",
+                "quantidade": "1",
+                "preco": "100,00",
+                "valor_total": "100,00",
+            }
+        ]
+
+        def _plune_side_effect(class_id, method, params):
+            # devolve sucesso genérico
+            return {"Field": {"Id": {"value": "9001"}}}
+
+        mock_plune.side_effect = _plune_side_effect
+
+        out = atualizar_pedidos_plune("746")
+        assert out["status"] in ("updated", "partial")
+        assert out["deal_id"] == "746"
+        assert out["pedidos"][0]["status"] == "updated"
+        # Deve ter chamado Update do pedido e Update do item
+        calls = [(c.args[0], c.args[1]) for c in mock_plune.mock_calls if c.args]
+        assert ("Venda.Pedido", "Update") in calls
+        assert ("Venda.PedidoItem", "Update") in calls

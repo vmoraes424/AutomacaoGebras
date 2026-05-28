@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 
 from .config import (
     ARQUIVO_AVISOS_APROVACAO_PLUNE,
-    DEV_PLUNE_APROVADO_NAO,
     DEV_PULAR_CLICKSIGN,
     TESTE_PLUNE_SEM_ASSINATURA,
     PLUNE_AUTH_TOKEN,
@@ -48,6 +47,7 @@ from .pedido_anexos import (
     anexar_contrato_pedido,
     anexar_proposta_pedido,
 )
+from .plune_anexo import remover_contratos_pedido, resolver_tipo_anexo_id
 from .pipedrive_fields import (
     FIELD_CEP,
     FIELD_CIDADE,
@@ -154,6 +154,38 @@ _TIPOS_PEDIDO_PLUNE = (
     TIPO_PEDIDO_RECORRENTE,
 )
 
+# Campos de pedido que a automação controla e pode atualizar na regeneração.
+# Importante: no Plune, campo presente sem valor vira NULL. Portanto, só enviamos
+# estes campos quando tivermos valor não-vazio para não apagar preenchimentos manuais.
+_CAMPOS_ATUALIZAVEIS_PEDIDO = frozenset(
+    {
+        # Geral / NF / contrato / centros
+        "StatusPedido",
+        "Serie",
+        "ModeloId",
+        "Descricao",
+        "ParametroContabilId",
+        "TipoContratoId",
+        "CentroCustoId",
+        "SubCentroCustoId",
+        "SubCentroCusto2Id",
+        "SubCentroCusto3Id",
+        "NaturezaOperacaoServicoId",
+        "TipoOpId",
+        "FreteporConta",
+        # Comissão
+        "BaseComissao",
+        "PercentualComissao",
+        "ValorComissao",
+        "ComissaoManual",
+        # Cobrança / observações / custom
+        "x1_PrevisaoCobranca",
+        "Observacao",
+        "ObservacaoNF",
+        "x1_ObservacaoAnexo",
+    }
+)
+
 _PEDIDO_TIPO_CONFIG = {
     TIPO_PEDIDO_IMPLANTACAO: {
         "label": "Implantação",
@@ -181,6 +213,12 @@ def _pedido_modelo_id(branch_id: str) -> str:
         str(cfg.get("pedido_modelo_id") or PLUNE_PEDIDO_MODELO_ID).strip()
         or PLUNE_PEDIDO_MODELO_ID
     )
+
+
+def _natureza_operacao_servico_id(branch_id: str) -> str:
+    """Natureza da Operação sobre Serviço — por filial (FK Venda_Pedido_fkey_1307554999)."""
+    cfg = settings_por_branch(branch_id)
+    return str(cfg.get("natureza_operacao_servico_id") or "2").strip() or "2"
 
 
 def _parametro_contabil_id(tipo_pedido: str, branch_id: str) -> str:
@@ -752,7 +790,7 @@ def vincular_pedidos_plune_implantacao_recorrente(
 
 
 def anexar_contrato_local_aos_pedidos_deal(deal_id: str) -> None:
-    """Anexa o .docx local aos pedidos após fill_contract (dev / teste sem assinatura)."""
+    """Remove contrato antigo e anexa o .docx local após fill_contract (dev/teste)."""
     from .config import DEV_PULAR_CLICKSIGN, TESTE_PLUNE_SEM_ASSINATURA
 
     if not (TESTE_PLUNE_SEM_ASSINATURA or DEV_PULAR_CLICKSIGN):
@@ -764,6 +802,14 @@ def anexar_contrato_local_aos_pedidos_deal(deal_id: str) -> None:
         pedido = _buscar_pedido_por_pedido_integracao(chave)
         if not pedido or not pedido.get("id") or not pedido.get("branch_id"):
             continue
+        try:
+            remover_contratos_pedido(
+                pedido_id=str(pedido["id"]),
+                branch_id=str(pedido["branch_id"]),
+            tipo_anexo_contrato_id=resolver_tipo_anexo_id("CONTRATO") or None,
+            )
+        except Exception:
+            pass
         anexar_contrato_pedido(
             deal_id,
             pedido["id"],
@@ -951,6 +997,7 @@ def _montar_params_pedido(deal: dict, parceiro: dict, tipo_pedido: str) -> dict:
     params["BranchId"] = branch_id
     params["Serie"] = _pedido_serie(branch_id)
     params["ModeloId"] = _pedido_modelo_id(branch_id)
+    params["NaturezaOperacaoServicoId"] = _natureza_operacao_servico_id(branch_id)
     params["StatusPedido"] = tipo_config["status_pedido"]
     params["ClienteId"] = str(parceiro["id"])
     params["Descricao"] = _descricao_pedido_plune(deal, tipo_pedido)
@@ -1080,6 +1127,200 @@ def _buscar_pedido_por_pedido_integracao(pedido_integracao: str) -> dict | None:
     }
 
 
+def _buscar_itens_pedido_plune(pedido_id: str) -> list[dict]:
+    """Lista itens do pedido no Plune (Venda.PedidoItem/Browse)."""
+    if not pedido_id:
+        return []
+    prefix = "Venda.PedidoItem."
+    params = {
+        f"{prefix}CompanyId": PLUNE_COMPANY_ID,
+        f"{prefix}PedidoId": str(pedido_id),
+        "_Venda.PedidoItem.BrowseSequence": [
+            "Id",
+            "PedidoId",
+            "ClienteId",
+            "BranchId",
+            "ProdutoId",
+            "Quantidade",
+            "Preco",
+            "ValorTotal",
+        ],
+        "_Venda.PedidoItem.BrowseLimit": "50",
+    }
+    payload = _plune_get("Venda.PedidoItem", "Browse", params)
+    rows = payload.get("data", {}).get("row", []) or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    out: list[dict] = []
+    for row in rows:
+        out.append(
+            {
+                "id": _field_value(row, "Id"),
+                "pedido_id": _field_value(row, "PedidoId"),
+                "cliente_id": _field_value(row, "ClienteId"),
+                "branch_id": _field_value(row, "BranchId"),
+                "produto_id": _field_value(row, "ProdutoId"),
+                "quantidade": _field_value(row, "Quantidade"),
+                "preco": _field_value(row, "Preco"),
+                "valor_total": _field_value(row, "ValorTotal"),
+            }
+        )
+    return out
+
+
+def _atualizar_preco_item_sole(
+    *,
+    pedido_id: str,
+    cliente_id: str,
+    branch_id: str,
+    novo_preco: str,
+) -> dict | None:
+    """
+    Atualiza o preço do item do produto SOLE (PLUNE_PRODUTO_SOLE_ID) no pedido.
+    Best-effort: se não encontrar o item, não apaga nem insere nada.
+    """
+    if not (pedido_id and cliente_id and novo_preco):
+        return None
+    if not PLUNE_PRODUTO_SOLE_ID:
+        return {"erro": "PLUNE_PRODUTO_SOLE_ID_nao_configurado"}
+
+    itens = _buscar_itens_pedido_plune(pedido_id)
+    alvo = None
+    for item in itens:
+        if str(item.get("produto_id") or "").strip() == str(PLUNE_PRODUTO_SOLE_ID).strip():
+            alvo = item
+            break
+    if not alvo:
+        return {"status": "not_found", "pedido_id": str(pedido_id), "produto_id": PLUNE_PRODUTO_SOLE_ID}
+
+    item_id = str(alvo.get("id") or "").strip()
+    if not item_id:
+        return {"status": "missing_item_id", "pedido_id": str(pedido_id)}
+
+    params = {
+        "Venda.PedidoItem.CompanyId": PLUNE_COMPANY_ID,
+        "Venda.PedidoItem.ClienteId": str(cliente_id),
+        "Venda.PedidoItem.PedidoId": str(pedido_id),
+        "Venda.PedidoItem.Id": str(item_id),
+        "Venda.PedidoItem.Preco": str(novo_preco),
+    }
+    if branch_id:
+        # Alguns ambientes exigem filial no item para coerência/custo do produto.
+        params["Venda.PedidoItem.BranchId"] = str(branch_id)
+    payload = _plune_get("Venda.PedidoItem", "Update", params)
+    return {"status": "updated", "pedido_item_id": item_id, "payload": payload}
+
+
+def _montar_campos_update_pedido(deal: dict, tipo_pedido: str) -> tuple[dict[str, str], str]:
+    """
+    Reusa o mesmo cálculo do Insert para definir os campos (comissão, centros, etc.),
+    mas devolve apenas os campos permitidos para Update (sem apagar campos manuais).
+    Retorna (campos_update, novo_preco_item).
+    """
+    parceiro, _criado = _resolver_ou_criar_parceiro(deal)
+    params = _montar_params_pedido(deal, parceiro, tipo_pedido)
+    novo_preco = str(params.pop("_valor_item_preco", "") or "").strip()
+
+    update: dict[str, str] = {}
+    for key, value in params.items():
+        if key not in _CAMPOS_ATUALIZAVEIS_PEDIDO:
+            continue
+        texto = str(value or "").strip()
+        if not texto:
+            continue
+        update[key] = texto
+    return update, novo_preco
+
+
+def atualizar_pedidos_plune(deal_id: str) -> dict:
+    """
+    Regeneração: atualiza pedidos já existentes no Plune (cabeçalho + preço do item SOLE).
+    Não cria novos pedidos.
+    """
+    deal_id = str(deal_id).strip()
+    deal = buscar_deal_por_id(deal_id)
+    if not deal:
+        raise PluneError(f"Deal {deal_id} não encontrado no Pipedrive")
+
+    pedidos_out: list[dict] = []
+    for tipo_pedido in _TIPOS_PEDIDO_PLUNE:
+        chave = _pedido_integracao_tipo(deal_id, tipo_pedido)
+        pedido = _buscar_pedido_por_pedido_integracao(chave)
+        if not pedido or not pedido.get("id") or not pedido.get("cliente_id"):
+            pedidos_out.append(
+                {
+                    "status": "missing",
+                    "deal_id": deal_id,
+                    "tipo": tipo_pedido,
+                    "pedido_integracao": chave,
+                    "reason": "pedido_nao_encontrado",
+                }
+            )
+            continue
+
+        pedido_id = str(pedido["id"]).strip()
+        cliente_id = str(pedido["cliente_id"]).strip()
+        branch_id = str(pedido.get("branch_id") or "").strip()
+
+        campos_update, novo_preco = _montar_campos_update_pedido(deal, tipo_pedido)
+
+        params_update: dict[str, str] = {
+            "Venda.Pedido.CompanyId": PLUNE_COMPANY_ID,
+            "Venda.Pedido.ClienteId": cliente_id,
+            "Venda.Pedido.Id": pedido_id,
+        }
+        for key, value in campos_update.items():
+            params_update[f"Venda.Pedido.{key}"] = value
+
+        payload_update = _plune_get("Venda.Pedido", "Update", params_update)
+
+        item_result = None
+        if novo_preco:
+            try:
+                item_result = _atualizar_preco_item_sole(
+                    pedido_id=pedido_id,
+                    cliente_id=cliente_id,
+                    branch_id=branch_id,
+                    novo_preco=novo_preco,
+                )
+            except PluneError as exc:
+                item_result = {"status": "failed", "erro": str(exc)}
+
+        pedidos_out.append(
+            {
+                "status": "updated",
+                "deal_id": deal_id,
+                "tipo": tipo_pedido,
+                "pedido_integracao": chave,
+                "pedido_id": pedido_id,
+                "cliente_id": cliente_id,
+                "branch_id": branch_id,
+                "campos_atualizados": sorted(campos_update.keys()),
+                "item": item_result,
+                "payload": payload_update,
+            }
+        )
+
+    # Reforça vínculo entre implantação/recorrente (idempotente).
+    try:
+        parceiro, _ = _resolver_ou_criar_parceiro(deal)
+        vincular_pedidos_plune_implantacao_recorrente(
+            pedidos_out, cliente_id=str(parceiro["id"])
+        )
+    except Exception:
+        # Não falha a atualização inteira por erro de vínculo.
+        pass
+
+    if any(p.get("status") == "updated" for p in pedidos_out):
+        status = "updated"
+    elif all(p.get("status") == "missing" for p in pedidos_out):
+        status = "missing"
+    else:
+        status = "partial"
+
+    return {"status": status, "deal_id": deal_id, "pedidos": pedidos_out}
+
+
 def _inserir_ou_substituir_param_insert(
     pairs: list[tuple[str, str]], field_key: str, value: str
 ) -> list[tuple[str, str]]:
@@ -1104,6 +1345,7 @@ _INSERT_PARAMS_SUBSTITUIR_OU_ACRESCENTAR = frozenset(
         "StatusPedido",
         "Serie",
         "ModeloId",
+        "NaturezaOperacaoServicoId",
         "TipoContratoId",
         "BaseComissao",
         "PercentualComissao",
@@ -1156,32 +1398,18 @@ def _anexar_documentos_pedido_criado(
     cache: CacheAnexosDeal | None,
     anexar_contrato_dev: bool,
 ) -> dict:
-    """Proposta e contrato (dev) em paralelo; mesmo arquivo reutilizado via cache."""
-    anexos: dict = {}
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futuros = {
-            "proposta": executor.submit(
-                anexar_proposta_pedido,
-                deal_id,
-                pedido_id,
-                branch_id,
-                cache=cache,
-            )
-        }
-        if anexar_contrato_dev:
-            futuros["contrato"] = executor.submit(
-                anexar_contrato_pedido,
-                deal_id,
-                pedido_id,
-                branch_id,
-                permitir_docx_local=True,
-                cache=cache,
-            )
-        for chave, futuro in futuros.items():
-            resultado = futuro.result()
-            if resultado:
-                anexos[chave] = resultado
-    return anexos
+    """
+    Na criação do pedido: anexa SOMENTE a proposta.
+    O contrato deve ser anexado apenas quando estiver assinado (na aprovação pós-Clicksign).
+    """
+    _ = anexar_contrato_dev  # compatibilidade de assinatura
+    anexo = anexar_proposta_pedido(
+        deal_id,
+        pedido_id,
+        branch_id,
+        cache=cache,
+    )
+    return {"proposta": anexo} if anexo else {}
 
 
 def _criar_pedido_plune_tipo(
@@ -1528,21 +1756,6 @@ def aprovar_pedidos_plune(
 ) -> dict:
     """Após assinatura do contrato, aprova pedidos Plune e define DataEntrega (dd/mm/aaaa)."""
     deal_id = str(deal_id)
-    if DEV_PLUNE_APROVADO_NAO:
-        return {
-            "status": "skipped",
-            "deal_id": deal_id,
-            "reason": "dev_plune_aprovado_nao",
-            "pedidos": [
-                {
-                    "status": "skipped",
-                    "deal_id": deal_id,
-                    "tipo": tipo,
-                    "reason": "dev_plune_aprovado_nao",
-                }
-                for tipo in _TIPOS_PEDIDO_PLUNE
-            ],
-        }
     cache = CacheAnexosDeal(deal_id, permitir_docx_local=False)
     cache.iniciar_prefetch_assincrono(proposta=False, contrato=True)
 

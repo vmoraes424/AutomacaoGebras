@@ -158,11 +158,11 @@ def _validar_mapeamento_plune(deal: dict, erros: list[str]) -> str:
             "Selecione a filial no deal (Matriz ou Iribarrem San Martin)."
         )
         return ""
-    if not filial_tem_mapeamento(label_filial, id_filial) and not default_branch_id():
+    if not filial_tem_mapeamento(label_filial, id_filial):
         erros.append(
-            "Filial sem mapeamento para BranchId no Plune e default_branch_id vazio. "
+            "Filial sem mapeamento para BranchId no Plune. "
             f"Valor no Pipedrive: {get_filial_label(deal) or id_filial!r}. "
-            "Cadastre em pipedrive_filial (MySQL) ou app_meta.default_branch_id."
+            "Cadastre em pipedrive_filial (MySQL)."
         )
         return ""
     try:

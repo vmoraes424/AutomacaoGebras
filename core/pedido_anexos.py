@@ -20,10 +20,18 @@ from .config import (
 )
 from .envelope_state import buscar_por_deal_id
 from .pipedrive_files import baixar_pdf_proposta_deal
-from .plune_anexo import inserir_anexo_pedido
+from .plune_anexo import (
+    inserir_anexo_pedido,
+    remover_anexos_automacao,
+    resolver_tipo_anexo_id,
+)
 
 _SIGNED_CONTRACT_RETRIES = 4
 _SIGNED_CONTRACT_RETRY_WAIT_SEC = 3
+
+# Regra interna: marcação para identificar anexos automatizados.
+_OBS_AUTOMACAO_CONTRATO = "AUTOMACAO_GEBRAS_CONTRATO"
+_OBS_AUTOMACAO_PROPOSTA = "AUTOMACAO_GEBRAS_PROPOSTA"
 
 
 def _mime_por_extensao(nome: str) -> str:
@@ -178,12 +186,25 @@ def anexar_proposta_pedido(
             )
             return None
         conteudo, nome = pdf
+        tipo_id = resolver_tipo_anexo_id("PROPOSTA") or None
+        # Evita lixo: remove proposta anterior criada pela automação (mesmo tipo/obs)
+        try:
+            remover_anexos_automacao(
+                pedido_id=pedido_id,
+                branch_id=branch_id,
+                tipo_anexo_id=tipo_id,
+                observacao_prefix=_OBS_AUTOMACAO_PROPOSTA,
+            )
+        except Exception:
+            pass
         resultado = inserir_anexo_pedido(
             pedido_id=pedido_id,
             branch_id=branch_id,
             nome_arquivo=nome,
             conteudo=conteudo,
             content_type="application/pdf",
+            tipo_anexo=tipo_id,
+            observacao=_OBS_AUTOMACAO_PROPOSTA,
         )
         print(
             f"[v] Deal {deal_id}: proposta «{nome}» anexada ao pedido Plune {pedido_id} "
@@ -227,12 +248,25 @@ def anexar_contrato_pedido(
             )
             return None
         conteudo, nome, mime = arquivo
+        tipo_id = resolver_tipo_anexo_id("CONTRATO") or None
+        # Evita lixo: remove contrato anterior criado pela automação (mesmo tipo/obs)
+        try:
+            remover_anexos_automacao(
+                pedido_id=pedido_id,
+                branch_id=branch_id,
+                tipo_anexo_id=tipo_id,
+                observacao_prefix=_OBS_AUTOMACAO_CONTRATO,
+            )
+        except Exception:
+            pass
         resultado = inserir_anexo_pedido(
             pedido_id=pedido_id,
             branch_id=branch_id,
             nome_arquivo=nome,
             conteudo=conteudo,
             content_type=mime,
+            tipo_anexo=tipo_id,
+            observacao=_OBS_AUTOMACAO_CONTRATO,
         )
         print(
             f"[v] Deal {deal_id}: contrato «{nome}» anexado ao pedido Plune {pedido_id} "

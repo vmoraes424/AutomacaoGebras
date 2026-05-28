@@ -13,6 +13,7 @@ from .database import (
     listar_aguardando_pedido_plune,
     marcar_pedido_criado,
     marcar_pedidos_aprovados,
+    limpar_template_local_envelope,
     salvar_envelope_pendente,
     salvar_pedido_plune_key,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "listar_aguardando_pedido_plune",
     "marcar_pedido_criado",
     "marcar_pedidos_aprovados",
+    "limpar_template_local_envelope",
     "salvar_envelope_pendente",
     "salvar_pedido_plune_criado",
     "salvar_pedido_plune_key",

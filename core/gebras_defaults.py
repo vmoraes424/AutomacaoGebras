@@ -37,10 +37,13 @@ PLUNE_PEDIDO_MODELO_ID = "01"
 # Comissão pedido recorrente: ValorComissao = PLUNE_COMISSAO_MESES_ANUAL × valor do pedido
 PLUNE_COMISSAO_MESES_ANUAL = 12
 
+# --- Pipedrive: etapa obrigatória ao marcar deal como ganho ---
+PIPEDRIVE_STAGE_NEGOCIACAO_NOME = "Negociação"
+
 # --- Automação (paths e polling) ---
 INTERVALO_POLLING_SEGUNDOS = 30
 # Margem antes do arranque: ganhos nesse intervalo ainda entram no corte (evita perder deal ganho segundos antes do script subir)
-CORTE_TEMPORAL_GRACE_MINUTOS = 15
+CORTE_TEMPORAL_GRACE_MINUTOS = 5
 MODELO_DOCX = "contrato_padrao.docx"
 PASTA_SAIDA = "contratos"
 ARQUIVO_AVISOS_APROVACAO_PLUNE = "runtime/state/avisos_aprovacao_plune.txt"

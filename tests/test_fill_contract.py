@@ -71,3 +71,16 @@ def test_numeros_pedidos_no_contexto(mock_exists, mock_docx_cls, mock_parceiro):
     contexto = doc.render.call_args[0][0]
     assert "9001" in contexto["numeros_pedidos"]
     assert "9002" in contexto["numeros_pedidos"]
+
+
+@patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
+@patch("core.automacao_contrato.DocxTemplate")
+@patch("core.automacao_contrato.os.path.exists", return_value=True)
+def test_fill_contract_usa_template_path(mock_exists, mock_docx_cls, mock_parceiro):
+    deal = {"id": 746, "title": "Teste", "custom_fields": {}}
+    mock_parceiro.return_value = None
+    doc = MagicMock()
+    mock_docx_cls.return_value = doc
+
+    fill_contract(deal, template_path="X.docx")
+    mock_docx_cls.assert_called_once_with("X.docx")

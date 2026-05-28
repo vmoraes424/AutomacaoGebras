@@ -1,0 +1,137 @@
+"""Etapa do funil Pipedrive: garantir deal em Negociação ao marcar como ganho."""
+
+from __future__ import annotations
+
+import unicodedata
+from typing import Any
+
+import requests
+
+from core.config import PIPEDRIVE_API_TOKEN
+from core.gebras_defaults import PIPEDRIVE_STAGE_NEGOCIACAO_NOME
+
+_stages_por_pipeline: dict[str, dict[str, int]] = {}
+
+
+def _normalizar_nome_etapa(nome: str) -> str:
+    s = (nome or "").strip().casefold()
+    s = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in s if not unicodedata.combining(c))
+
+
+def _headers() -> dict[str, str]:
+    return {"x-api-token": PIPEDRIVE_API_TOKEN}
+
+
+def limpar_cache_stages() -> None:
+    """Limpa cache de etapas (útil em testes)."""
+    _stages_por_pipeline.clear()
+
+
+def _carregar_stages_pipeline(pipeline_id: str) -> None:
+    response = requests.get(
+        "https://api.pipedrive.com/api/v2/stages",
+        headers=_headers(),
+        params={"pipeline_id": pipeline_id, "limit": 500},
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Pipedrive stages -> {response.status_code}: {response.text[:500]}"
+        )
+    mapping: dict[str, int] = {}
+    for stage in response.json().get("data") or []:
+        name = stage.get("name") or ""
+        sid = stage.get("id")
+        if sid is not None:
+            mapping[_normalizar_nome_etapa(name)] = int(sid)
+    _stages_por_pipeline[pipeline_id] = mapping
+
+
+def stage_id_negociacao(pipeline_id: str | int) -> int:
+    """Retorna o stage_id da etapa Negociação no pipeline informado."""
+    pid = str(pipeline_id)
+    if pid not in _stages_por_pipeline:
+        _carregar_stages_pipeline(pid)
+    chave = _normalizar_nome_etapa(PIPEDRIVE_STAGE_NEGOCIACAO_NOME)
+    stage_id = _stages_por_pipeline.get(pid, {}).get(chave)
+    if stage_id is None:
+        raise RuntimeError(
+            f"Pipedrive: etapa {PIPEDRIVE_STAGE_NEGOCIACAO_NOME!r} não encontrada "
+            f"no pipeline {pipeline_id}."
+        )
+    return stage_id
+
+
+def deal_esta_em_negociacao(deal: dict[str, Any]) -> bool:
+    pipeline_id = deal.get("pipeline_id")
+    stage_id_atual = deal.get("stage_id")
+    if pipeline_id is None or stage_id_atual is None:
+        return False
+    return int(stage_id_atual) == stage_id_negociacao(pipeline_id)
+
+
+def _buscar_deal_v2(deal_id: str) -> dict[str, Any]:
+    response = requests.get(
+        f"https://api.pipedrive.com/api/v2/deals/{deal_id}",
+        headers=_headers(),
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Pipedrive GET deal -> {response.status_code}: {response.text[:500]}"
+        )
+    data = response.json().get("data")
+    if not data:
+        raise RuntimeError(f"Pipedrive GET deal {deal_id}: resposta sem data.")
+    return data
+
+
+def _mover_deal_para_stage(deal_id: str, stage_id: int) -> None:
+    response = requests.patch(
+        f"https://api.pipedrive.com/api/v2/deals/{deal_id}",
+        headers=_headers(),
+        json={"stage_id": stage_id},
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Pipedrive PATCH deal stage -> {response.status_code}: {response.text[:500]}"
+        )
+
+
+def garantir_deal_em_etapa_negociacao(deal: dict[str, Any]) -> bool:
+    """
+    Garante que o deal está na etapa Negociação do seu pipeline.
+
+    Retorna True se o deal foi movido; False se já estava na etapa correta.
+    Atualiza deal['stage_id'] em memória após mover.
+  """
+    deal_id = str(deal.get("id") or "")
+    if not deal_id:
+        raise RuntimeError("Deal sem id para verificar etapa Negociação.")
+
+    pipeline_id = deal.get("pipeline_id")
+    stage_id_atual = deal.get("stage_id")
+    if pipeline_id is None or stage_id_atual is None:
+        deal_v2 = _buscar_deal_v2(deal_id)
+        pipeline_id = deal_v2.get("pipeline_id")
+        stage_id_atual = deal_v2.get("stage_id")
+        if pipeline_id is not None:
+            deal["pipeline_id"] = pipeline_id
+        if stage_id_atual is not None:
+            deal["stage_id"] = stage_id_atual
+
+    if pipeline_id is None:
+        raise RuntimeError(
+            f"Pipedrive deal {deal_id}: pipeline_id ausente; não é possível "
+            f"resolver etapa {PIPEDRIVE_STAGE_NEGOCIACAO_NOME!r}."
+        )
+
+    destino = stage_id_negociacao(pipeline_id)
+    if int(stage_id_atual or 0) == destino:
+        return False
+
+    _mover_deal_para_stage(deal_id, destino)
+    deal["stage_id"] = destino
+    return True
