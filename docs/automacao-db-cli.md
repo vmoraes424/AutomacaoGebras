@@ -50,6 +50,8 @@ python scripts/automacao_db.py list deals --limit 50
 
 Não altera catálogo (`pipedrive_filial`, `branch_config`, `plune_subcentro`).
 
+Para cada deal, antes de apagar linhas em `gebras_automacao`, o comando tenta **remover o pedido no HUB** (`MYSQL_DATABASE_HUB`) se `hub_pedido_criado=1` no envelope (pedido criado pela automação). Não remove pedidos no Plune. Ver [`docs/Hub/Integracao-AutomacaoGebras.md`](Hub/Integracao-AutomacaoGebras.md).
+
 ```bash
 python scripts/automacao_db.py rm deal 746
 python scripts/automacao_db.py rm deal 746 -y

@@ -27,8 +27,13 @@ from core.config import (
     PIPEDRIVE_API_TOKEN,
     CORTE_TEMPORAL_GRACE_MINUTOS,
     TESTE_PLUNE_SEM_ASSINATURA,
+    DEV_HUB_SEM_APROVACAO_PLUNE,
 )
-from core.database import carregar_deals_processados, salvar_deal_processado
+from core.database import (
+    carregar_deals_processados,
+    garantir_envelope_para_hub,
+    salvar_deal_processado,
+)
 from core.envelope_state import (
     carregar_pedidos_plune_criados,
     buscar_por_deal_id,
@@ -650,6 +655,38 @@ def buscar_deals_ganhos():
         return []
 
 
+def _fluxo_hub_apos_plune(
+    deal_id: str,
+    parceiro_criado_plune: bool,
+    *,
+    numeros_pedidos: dict[str, str] | None = None,
+) -> None:
+    """
+    Produção (DEV_HUB_SEM_APROVACAO_PLUNE=false): HUB em processar_contratos_assinados,
+    após aprovar_pedidos_plune.
+
+    Dev (DEV_HUB_SEM_APROVACAO_PLUNE=true): HUB logo após criar/atualizar pedidos Plune no ganho.
+    """
+    if not DEV_HUB_SEM_APROVACAO_PLUNE:
+        return
+    if numeros_pedidos is not None and not any(
+        str(v).strip() for v in numeros_pedidos.values() if v is not None
+    ):
+        print(
+            f"[*] HUB (dev): sem números de pedido Plune — deal {deal_id} (aguardar Plune).",
+            flush=True,
+        )
+        return
+    garantir_envelope_para_hub(
+        deal_id, parceiro_plune_criado=parceiro_criado_plune
+    )
+    from core.hub_pedido import tentar_criar_pedido_hub_deal
+
+    tentar_criar_pedido_hub_deal(
+        deal_id, parceiro_plune_criado=parceiro_criado_plune
+    )
+
+
 def log_resultado_plune(deal_id: str, result: dict) -> None:
     pedidos = result.get("pedidos")
     if not pedidos:
@@ -826,6 +863,7 @@ def processar_deals_pendentes():
 
             # Plune: criar ou atualizar pedidos antes do contrato
             numeros_pedidos: dict[str, str] = {}
+            parceiro_criado_plune = False
             if registro:
                 print(
                     f"    -> Regeneração: atualizando pedidos no Plune (deal {deal_id})...",
@@ -837,6 +875,11 @@ def processar_deals_pendentes():
                     result_plune = atualizar_pedidos_plune(deal_id)
                     log_resultado_plune(deal_id, result_plune)
                     numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+                    _fluxo_hub_apos_plune(
+                        deal_id,
+                        bool(registro.get("parceiro_plune_criado")),
+                        numeros_pedidos=numeros_pedidos,
+                    )
                 except DealValidationError as validation_error:
                     print(
                         f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
@@ -860,6 +903,7 @@ def processar_deals_pendentes():
                 )
                 try:
                     result_plune = criar_pedido_plune(deal_id, anexar_contrato=False)
+                    parceiro_criado_plune = bool(result_plune.get("parceiro_criado"))
                     log_resultado_plune(deal_id, result_plune)
                     # Se o MySQL local já marca o pedido como criado, mas o deal não tem
                     # registro de envelope pendente (registro=None), tratamos como
@@ -877,6 +921,11 @@ def processar_deals_pendentes():
                         result_plune = atualizar_pedidos_plune(deal_id)
                         log_resultado_plune(deal_id, result_plune)
                     numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+                    _fluxo_hub_apos_plune(
+                        deal_id,
+                        parceiro_criado_plune,
+                        numeros_pedidos=numeros_pedidos,
+                    )
                 except DealValidationError as validation_error:
                     print(
                         f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
@@ -971,12 +1020,18 @@ def processar_deals_pendentes():
                         doc_path, envelope_name, sequence_dinamica
                     )
 
+                    parceiro_para_envelope = parceiro_criado_plune
+                    if registro:
+                        parceiro_para_envelope = bool(
+                            registro.get("parceiro_plune_criado")
+                        ) or parceiro_criado_plune
                     salvar_envelope_pendente(
                         deal_id,
                         envelope_id,
                         envelope_name,
                         template_file_id=template_file_id,
                         template_local_path=template_path,
+                        parceiro_plune_criado=parceiro_para_envelope,
                     )
                     salvar_deal_processado(deal_id, won_time_str)
                     algum_processado = True
@@ -1062,6 +1117,24 @@ def processar_contratos_assinados():
             log_resultado_plune(deal_id, result)
             if result.get("status") in ("approved", "skipped"):
                 marcar_pedidos_aprovados(deal_id)
+                if not DEV_HUB_SEM_APROVACAO_PLUNE:
+                    from core.hub_pedido import tentar_criar_pedido_hub_deal
+
+                    registro_hub = buscar_por_deal_id(deal_id)
+                    tentar_criar_pedido_hub_deal(
+                        deal_id,
+                        parceiro_plune_criado=(
+                            bool(registro_hub.get("parceiro_plune_criado"))
+                            if registro_hub
+                            else None
+                        ),
+                    )
+                else:
+                    print(
+                        f"[*] HUB (dev): pedido já disparado no ganho "
+                        f"(DEV_HUB_SEM_APROVACAO_PLUNE=1) — deal {deal_id}.",
+                        flush=True,
+                    )
                 # Cleanup do template local usado para gerar o contrato (somente após anexar assinado).
                 try:
                     path_tpl = str(record.get("template_local_path") or "").strip()
@@ -1111,6 +1184,11 @@ def main():
     if DEV_PULAR_CLICKSIGN:
         print(
             "[*] DEV_PULAR_CLICKSIGN=1 — a API Clicksign não é chamada (só gera o .docx no disco; use com TESTE_PLUNE_SEM_ASSINATURA em dev para ir ao Plune)."
+        )
+    if DEV_HUB_SEM_APROVACAO_PLUNE:
+        print(
+            "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune no ganho "
+            "(sem esperar aprovação Plune pós-assinatura)."
         )
     print(
         f"[*] Poll a cada {INTERVALO_POLLING_SEGUNDOS}s — cada ciclo imprime um resumo se nada novo ocorrer.\n"

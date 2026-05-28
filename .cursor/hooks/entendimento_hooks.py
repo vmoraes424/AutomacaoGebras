@@ -15,6 +15,7 @@ TRACKED_BASENAMES = frozenset(
         "ENTENDIMENTO_SISTEMA.md",
         "contrato_padrao.docx",
         "hooks.json",
+        "hub_pedido.py",
     }
 )
 
@@ -28,7 +29,9 @@ def _session_context() -> str:
         "-> grava em `contratos/` -> **Clicksign API v3** (grupos sequenciais). "
         "Estado: MySQL `gebras_automacao` (CLI automacao_db). "
         "`criar_webhook.py` so **regista** webhook; nao processa callbacks aqui. "
-        "Mapeamentos CRM usam **hashes** de custom fields no codigo."
+        "Mapeamentos CRM usam **hashes** de custom fields no codigo. "
+        "Pos-assinatura: pedido **HUB** (`MYSQL_DATABASE_HUB`, `core/hub_pedido.py`) "
+        "so se parceiro Plune ja existia no ganho; ver `docs/Hub/`."
     )
 
 
@@ -59,7 +62,12 @@ def _is_tracked_file(path: str) -> bool:
     base = os.path.basename(norm)
     if base in TRACKED_BASENAMES:
         return True
-    markers = ("/.cursor/skills/", "/.cursor/agents/", "/.cursor/hooks/")
+    markers = (
+        "/.cursor/skills/",
+        "/.cursor/agents/",
+        "/.cursor/hooks/",
+        "/docs/Hub/",
+    )
     return any(m in norm for m in markers)
 
 
@@ -70,7 +78,9 @@ def _post_write_context(paths: list[str]) -> str | None:
         "Editaste um ficheiro central do fluxo (automacao, modelo, doc de sistema ou `.cursor/`). "
         "Se o **comportamento** mudou, atualiza `ENTENDIMENTO_SISTEMA.md` e, se aplicavel, "
         "placeholders em `contrato_padrao.docx` / hashes Pipedrive em `fill_contract()` ou "
-        "signatarios em `extrair_signatarios()`. Nao commits de tokens - preferir variaveis de ambiente."
+        "signatarios em `extrair_signatarios()`. "
+        "Fluxo HUB: alinhar `docs/Hub/` e `hub_pedido.py`. "
+        "Nao commits de tokens - preferir variaveis de ambiente."
     )
 
 

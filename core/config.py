@@ -69,6 +69,8 @@ MYSQL_PORT = _env_int("MYSQL_PORT", 3306)
 MYSQL_USER = _env("MYSQL_USER")
 MYSQL_PASSWORD = _env("MYSQL_PASSWORD")
 MYSQL_DATABASE = _env("MYSQL_DATABASE", "gebras_automacao")
+MYSQL_DATABASE_HUB = _env("MYSQL_DATABASE_HUB", "gebras")
+HUB_CODIGO_USUARIO_SISTEMA = _env_int("HUB_CODIGO_USUARIO_SISTEMA", 0)
 
 # --- Segredos e ambiente (.env) ---
 PIPEDRIVE_API_TOKEN = _env("PIPEDRIVE_API_TOKEN")
@@ -77,6 +79,8 @@ CLICKSIGN_WEBHOOK_URL = _env("CLICKSIGN_WEBHOOK_URL")
 PLUNE_AUTH_TOKEN = _env("PLUNE_AUTH_TOKEN")
 DEV_PULAR_CLICKSIGN = _env_bool("DEV_PULAR_CLICKSIGN", False)
 TESTE_PLUNE_SEM_ASSINATURA = _env_bool("TESTE_PLUNE_SEM_ASSINATURA", True)
+# true = cria pedido HUB logo após pedidos Plune no ganho (sem esperar aprovação pós-Clicksign)
+DEV_HUB_SEM_APROVACAO_PLUNE = _env_bool("DEV_HUB_SEM_APROVACAO_PLUNE", False)
 
 # --- Negócio (gebras_defaults) ---
 PLUNE_BASE_URL = G.PLUNE_BASE_URL
