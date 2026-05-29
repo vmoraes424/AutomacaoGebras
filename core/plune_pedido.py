@@ -971,7 +971,7 @@ def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
 
 
 def _descricao_pedido_plune(deal: dict, tipo_pedido: str) -> str:
-    """Geral | Descrição: somente código do contrato (CGRc...)."""
+    """Geral | Descrição: código do contrato (CGRc...); sem HUB usa deal_id."""
     return get_numero_contrato(deal)[:128]
 
 

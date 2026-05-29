@@ -15,6 +15,7 @@ from core.pipedrive_fields import (
     FIELD_NUMERO_CONTRATO_P2,
     FIELD_OBSERVACOES_DETALHES,
     FIELD_VALOR_IMPLANTACAO,
+    get_numero_contrato,
 )
 from core.pipedrive_validations import (
     DealValidationError,
@@ -50,3 +51,19 @@ def test_cep_vazio_retorna_erro():
 def test_cep_valido_ok():
     deal = {"custom_fields": {FIELD_CEP: "80010-000"}}
     assert _validar_campo_contrato(deal, "CEP", FIELD_CEP, "cep") is None
+
+
+def test_get_numero_contrato_sem_codigos_hub_usa_deal_id():
+    deal = {"id": 746, "custom_fields": {}}
+    assert get_numero_contrato(deal) == "CGRc746i746n1r0a26"
+
+
+def test_get_numero_contrato_com_codigos_hub():
+    deal = {
+        "id": 746,
+        "custom_fields": {
+            FIELD_NUMERO_CONTRATO_P1: "123",
+            FIELD_NUMERO_CONTRATO_P2: "456",
+        },
+    }
+    assert get_numero_contrato(deal) == "CGRc123i456n1r0a26"

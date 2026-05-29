@@ -72,14 +72,15 @@ class TestNumeroContrato:
         deal["custom_fields"][FIELD_NUMERO_CONTRATO_P1] = "665; 1942"
         assert get_numero_contrato(deal) == "CGRc665i352n1r0a26"
 
-    def test_p1_p2_vazios_usam_placeholder(self):
-        deal = {"custom_fields": {}}
-        assert get_numero_contrato(deal) == "CGRcXXXiXXXn1r0a26"
+    def test_p1_p2_vazios_usam_deal_id(self):
+        deal = {"id": 746, "custom_fields": {}}
+        assert get_numero_contrato(deal) == "CGRc746i746n1r0a26"
 
-    def test_apenas_p1_vazio(self):
+    def test_apenas_p1_vazio_usa_deal_id(self):
         deal = {
+            "id": 746,
             "custom_fields": {
                 FIELD_NUMERO_CONTRATO_P2: "352",
-            }
+            },
         }
-        assert get_numero_contrato(deal).startswith("CGRcXXXi352")
+        assert get_numero_contrato(deal) == "CGRc746i352n1r0a26"

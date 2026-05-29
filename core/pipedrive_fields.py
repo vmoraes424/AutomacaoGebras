@@ -10,8 +10,6 @@ from .database import default_branch_id, resolve_filial_branch
 # --- Hashes dos custom fields (Pipedrive) ---
 FIELD_NUMERO_CONTRATO_P1 = "14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b"
 FIELD_NUMERO_CONTRATO_P2 = "41a3157128d51e2fc803eeec4b242efafcb55b4e"
-# Placeholder no número do contrato (CGRc…i…) quando P1/P2 vazios no Pipedrive
-CODIGO_CONTRATO_PLACEHOLDER = "XXX"
 FIELD_NOME_CLIENTE = "28d491e0263008b437e28fc55bbad8302c4646c8"
 FIELD_ENDERECO = "81566ac6e038bb0ba3adfa122c798b3e497b7538"
 FIELD_CEP = "6d3373f7ee86c7d2449824136baf3ee1938a8ef1"
@@ -240,15 +238,18 @@ def _primeiro_codigo_instalacao_p1(p1_raw: str) -> str:
 
 
 def get_numero_contrato(deal_data: dict) -> str:
+    """Monta o identificador do contrato; sem códigos HUB usa o deal_id."""
     p1 = _primeiro_codigo_instalacao_p1(
         get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
     )
     p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2).strip()
-    if not p1:
-        p1 = CODIGO_CONTRATO_PLACEHOLDER
-    if not p2:
-        p2 = CODIGO_CONTRATO_PLACEHOLDER
-    return f"CGRc{p1}i{p2}{sufixo_ano_contrato_gebras()}"
+    sufixo = sufixo_ano_contrato_gebras()
+    if p1 and p2:
+        return f"CGRc{p1}i{p2}{sufixo}"
+    deal_id = str(deal_data.get("id", "")).strip() or "0"
+    p1 = p1 or deal_id
+    p2 = p2 or deal_id
+    return f"CGRc{p1}i{p2}{sufixo}"
 
 
 def normalizar_documento(documento: str) -> str:
