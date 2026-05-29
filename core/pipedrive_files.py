@@ -17,24 +17,41 @@ def _headers() -> dict[str, str]:
 
 
 def listar_arquivos_deal(deal_id: str) -> list[dict]:
-    """Lista metadados dos arquivos do deal."""
+    """Lista metadados de todos os arquivos do deal (com paginação)."""
     deal_id = str(deal_id).strip()
     if not deal_id:
         return []
-    response = requests.get(
-        f"https://api.pipedrive.com/v1/deals/{deal_id}/files",
-        params={"api_token": PIPEDRIVE_API_TOKEN},
-        headers=_headers(),
-        timeout=60,
-    )
-    if not response.ok:
-        raise RuntimeError(
-            f"Pipedrive files deal {deal_id} -> {response.status_code}: {response.text[:500]}"
+    arquivos: list[dict] = []
+    start = 0
+    limit = 100
+    while True:
+        response = requests.get(
+            f"https://api.pipedrive.com/v1/deals/{deal_id}/files",
+            params={
+                "api_token": PIPEDRIVE_API_TOKEN,
+                "start": start,
+                "limit": limit,
+            },
+            headers=_headers(),
+            timeout=60,
         )
-    data = response.json().get("data") or []
-    if isinstance(data, dict):
-        return [data]
-    return list(data)
+        if not response.ok:
+            raise RuntimeError(
+                f"Pipedrive files deal {deal_id} -> {response.status_code}: {response.text[:500]}"
+            )
+        body = response.json()
+        data = body.get("data") or []
+        if isinstance(data, dict):
+            data = [data]
+        arquivos.extend(data)
+        pagination = (body.get("additional_data") or {}).get("pagination") or {}
+        if not pagination.get("more_items_in_collection"):
+            break
+        next_start = pagination.get("next_start")
+        if next_start is None:
+            break
+        start = int(next_start)
+    return arquivos
 
 
 def _eh_pdf(meta: dict) -> bool:
@@ -56,18 +73,22 @@ def _nome_base(meta: dict) -> str:
     return Path(nome).stem.strip().lower()
 
 
-def _parse_file_time(meta: dict) -> str:
+def _file_sort_key(meta: dict) -> tuple[str, str, int]:
     """
-    Pipedrive v1 files traz add_time/update_time como string.
-    Aqui comparamos lexicograficamente (YYYY-MM-DD HH:MM:SS), que funciona para ordenação.
+    Chave para «último enviado ao deal».
+    add_time = anexo; update_time só desempata (não substitui upload mais recente).
     """
-    return str(meta.get("update_time") or meta.get("add_time") or "").strip()
+    add_t = str(meta.get("add_time") or "").strip()
+    upd_t = str(meta.get("update_time") or "").strip()
+    file_id = int(meta.get("id") or 0)
+    return (add_t, upd_t, file_id)
 
 
 def escolher_docx_contrato_padrao(arquivos: list[dict]) -> dict | None:
     """
     Seleciona template docx do deal pelo nome.
     Regra: basename (sem extensão) começa com 'contrato_padrao' (case-insensitive).
+    Entre vários candidatos, usa o **último enviado** (add_time, depois id).
     """
     candidatos = [a for a in arquivos if _eh_docx(a)]
     if not candidatos:
@@ -78,11 +99,7 @@ def escolher_docx_contrato_padrao(arquivos: list[dict]) -> dict | None:
     if not por_prefixo:
         return None
 
-    # Mais recente primeiro; fallback: maior id.
-    por_prefixo.sort(
-        key=lambda a: (_parse_file_time(a), int(a.get("id") or 0)),
-        reverse=True,
-    )
+    por_prefixo.sort(key=_file_sort_key, reverse=True)
     return por_prefixo[0]
 
 

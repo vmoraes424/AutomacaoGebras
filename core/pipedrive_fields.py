@@ -18,7 +18,11 @@ FIELD_DOCUMENTO = "176d2a0d5167d1edc9b949c75f8b9a7597eabe91"
 FIELD_QTD_SOLE = "f9923cdce1274da8c10cec1b9ab561e024504620"
 FIELD_VALOR_MENSAL = "2a331c4b62c9d46aae9451af25eca2d08a3fdf0a"  # Valor Recorrência
 FIELD_VALOR_IMPLANTACAO = "015407d5106c321a227f1ca881f920fe2e1042ec"
-FIELD_DATA_IMPLANTACAO = "2b8f62a107891e26390459cfa4048b3eedade11b"
+# Data de Implantação (varchar) — validado via API v2 dealFields
+FIELD_DATA_DE_IMPLANTACAO = "f40caca58878f19aefba960b87127753b7b932ca"
+# Data de Pagamento da Implantação (date) — x1_PrevisaoCobranca / contrato Word
+FIELD_DATA_PAGAMENTO_IMPLANTACAO = "2b8f62a107891e26390459cfa4048b3eedade11b"
+FIELD_DATA_IMPLANTACAO = FIELD_DATA_PAGAMENTO_IMPLANTACAO  # alias legado
 FIELD_DATA_PRIMEIRA_COBRANCA = "f5f69ea52e5f65b37c9672fdb4dcfb3b6a4cdbb2"
 FIELD_INDICADORES_QUALIDADE = "ffb2d5aec9acdee5a242ca19683bbf4caa24cd53"
 FIELD_QUALIDADE_ENERGIA = "c0a23912d889e00f51ed5bd08a55856a7e5dc930"
@@ -53,12 +57,13 @@ SIGNER_FIELDS = [
 # Seção Contrato no Pipedrive: obrigatórios para automação, exceto CAMPOS_CONTRATO_OPCIONAIS
 CAMPOS_CONTRATO_OPCIONAIS = frozenset(
     {
+        FIELD_NUMERO_CONTRATO_P1,
+        FIELD_NUMERO_CONTRATO_P2,
+        FIELD_DATA_DE_IMPLANTACAO,
+        FIELD_DATA_PAGAMENTO_IMPLANTACAO,
         FIELD_DATA_IMPLANTACAO,
         FIELD_VALOR_IMPLANTACAO,
         FIELD_OBSERVACOES_DETALHES,
-        # Cliente novo pode ainda não existir no HUB (sem códigos).
-        FIELD_NUMERO_CONTRATO_P1,
-        FIELD_NUMERO_CONTRATO_P2,
     }
 )
 
@@ -216,16 +221,35 @@ def get_documento(deal_data: dict) -> str:
     return get_val(deal_data, FIELD_DOCUMENTO).strip()
 
 
+def sufixo_ano_contrato_gebras(*, ano: int | None = None) -> str:
+    """Sufixo fixo do número de contrato com os 2 últimos dígitos do ano (ex.: n1r0a26)."""
+    if ano is None:
+        ano = datetime.now(ZoneInfo("America/Sao_Paulo")).year
+    return f"n1r0a{ano % 100:02d}"
+
+
+def _primeiro_codigo_instalacao_p1(p1_raw: str) -> str:
+    """Primeiro código do P1 (vírgula/; / espaço); usado no número do contrato."""
+    for parte in re.split(r"[,;\s]+", (p1_raw or "").strip()):
+        texto = parte.strip()
+        if texto:
+            return texto
+    return ""
+
+
 def get_numero_contrato(deal_data: dict) -> str:
     """Monta o identificador do contrato; sem códigos HUB usa o deal_id."""
-    p1 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P1).strip()
+    p1 = _primeiro_codigo_instalacao_p1(
+        get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
+    )
     p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2).strip()
+    sufixo = sufixo_ano_contrato_gebras()
     if p1 and p2:
-        return f"CGRc{p1}i{p2}n1r0a26"
+        return f"CGRc{p1}i{p2}{sufixo}"
     deal_id = str(deal_data.get("id", "")).strip() or "0"
     p1 = p1 or deal_id
     p2 = p2 or deal_id
-    return f"CGRc{p1}i{p2}n1r0a26"
+    return f"CGRc{p1}i{p2}{sufixo}"
 
 
 def normalizar_documento(documento: str) -> str:

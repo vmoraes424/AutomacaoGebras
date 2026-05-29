@@ -37,8 +37,9 @@ PLUNE_PEDIDO_MODELO_ID = "01"
 # Comissão pedido recorrente: ValorComissao = PLUNE_COMISSAO_MESES_ANUAL × valor do pedido
 PLUNE_COMISSAO_MESES_ANUAL = 12
 
-# --- Pipedrive: etapa obrigatória ao marcar deal como ganho ---
+# --- Pipedrive: etapas do funil ---
 PIPEDRIVE_STAGE_NEGOCIACAO_NOME = "Negociação"
+PIPEDRIVE_STAGE_CONTRATO_NOME = "Contrato"
 
 # --- Automação (paths e polling) ---
 INTERVALO_POLLING_SEGUNDOS = 30

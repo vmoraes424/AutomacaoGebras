@@ -1,4 +1,4 @@
-"""Etapa do funil Pipedrive: garantir deal em Negociação ao marcar como ganho."""
+"""Etapas do funil Pipedrive (Negociação no ganho; Contrato pós-assinatura)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,10 @@ from typing import Any
 import requests
 
 from core.config import PIPEDRIVE_API_TOKEN
-from core.gebras_defaults import PIPEDRIVE_STAGE_NEGOCIACAO_NOME
+from core.gebras_defaults import (
+    PIPEDRIVE_STAGE_CONTRATO_NOME,
+    PIPEDRIVE_STAGE_NEGOCIACAO_NOME,
+)
 
 _stages_por_pipeline: dict[str, dict[str, int]] = {}
 
@@ -48,19 +51,26 @@ def _carregar_stages_pipeline(pipeline_id: str) -> None:
     _stages_por_pipeline[pipeline_id] = mapping
 
 
-def stage_id_negociacao(pipeline_id: str | int) -> int:
-    """Retorna o stage_id da etapa Negociação no pipeline informado."""
+def stage_id_por_nome(pipeline_id: str | int, nome_etapa: str) -> int:
+    """Retorna o stage_id da etapa informada no pipeline."""
     pid = str(pipeline_id)
     if pid not in _stages_por_pipeline:
         _carregar_stages_pipeline(pid)
-    chave = _normalizar_nome_etapa(PIPEDRIVE_STAGE_NEGOCIACAO_NOME)
+    chave = _normalizar_nome_etapa(nome_etapa)
     stage_id = _stages_por_pipeline.get(pid, {}).get(chave)
     if stage_id is None:
         raise RuntimeError(
-            f"Pipedrive: etapa {PIPEDRIVE_STAGE_NEGOCIACAO_NOME!r} não encontrada "
-            f"no pipeline {pipeline_id}."
+            f"Pipedrive: etapa {nome_etapa!r} não encontrada no pipeline {pipeline_id}."
         )
     return stage_id
+
+
+def stage_id_negociacao(pipeline_id: str | int) -> int:
+    return stage_id_por_nome(pipeline_id, PIPEDRIVE_STAGE_NEGOCIACAO_NOME)
+
+
+def stage_id_contrato(pipeline_id: str | int) -> int:
+    return stage_id_por_nome(pipeline_id, PIPEDRIVE_STAGE_CONTRATO_NOME)
 
 
 def deal_esta_em_negociacao(deal: dict[str, Any]) -> bool:
@@ -100,16 +110,16 @@ def _mover_deal_para_stage(deal_id: str, stage_id: int) -> None:
         )
 
 
-def garantir_deal_em_etapa_negociacao(deal: dict[str, Any]) -> bool:
+def _garantir_deal_em_etapa(deal: dict[str, Any], nome_etapa: str) -> bool:
     """
-    Garante que o deal está na etapa Negociação do seu pipeline.
+    Garante que o deal está na etapa informada do seu pipeline.
 
     Retorna True se o deal foi movido; False se já estava na etapa correta.
     Atualiza deal['stage_id'] em memória após mover.
-  """
+    """
     deal_id = str(deal.get("id") or "")
     if not deal_id:
-        raise RuntimeError("Deal sem id para verificar etapa Negociação.")
+        raise RuntimeError(f"Deal sem id para verificar etapa {nome_etapa!r}.")
 
     pipeline_id = deal.get("pipeline_id")
     stage_id_atual = deal.get("stage_id")
@@ -125,13 +135,23 @@ def garantir_deal_em_etapa_negociacao(deal: dict[str, Any]) -> bool:
     if pipeline_id is None:
         raise RuntimeError(
             f"Pipedrive deal {deal_id}: pipeline_id ausente; não é possível "
-            f"resolver etapa {PIPEDRIVE_STAGE_NEGOCIACAO_NOME!r}."
+            f"resolver etapa {nome_etapa!r}."
         )
 
-    destino = stage_id_negociacao(pipeline_id)
+    destino = stage_id_por_nome(pipeline_id, nome_etapa)
     if int(stage_id_atual or 0) == destino:
         return False
 
     _mover_deal_para_stage(deal_id, destino)
     deal["stage_id"] = destino
     return True
+
+
+def garantir_deal_em_etapa_negociacao(deal: dict[str, Any]) -> bool:
+    """Garante etapa Negociação (ao marcar deal como ganho)."""
+    return _garantir_deal_em_etapa(deal, PIPEDRIVE_STAGE_NEGOCIACAO_NOME)
+
+
+def garantir_deal_em_etapa_contrato(deal: dict[str, Any]) -> bool:
+    """Garante etapa Contrato (após última assinatura e aprovação Plune)."""
+    return _garantir_deal_em_etapa(deal, PIPEDRIVE_STAGE_CONTRATO_NOME)

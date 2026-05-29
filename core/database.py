@@ -53,7 +53,7 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
 }
 _SEED_DEFAULT_BRANCH_ID = "751"
 
-_SCHEMA_VERSION = 8
+_SCHEMA_VERSION = 9
 _initialized = False
 
 
@@ -327,6 +327,17 @@ def _migrate_schema(conn: DbConnection) -> None:
         except pymysql.err.OperationalError as exc:
             if exc.args[0] != 1060:
                 raise
+    if version < 9:
+        for sql in (
+            "ALTER TABLE envelopes_pending ADD COLUMN parceiro_plune_criado TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE envelopes_pending ADD COLUMN hub_pedido_criado TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE envelopes_pending ADD COLUMN pedido_hub_id INT NULL",
+        ):
+            try:
+                conn.execute(sql)
+            except pymysql.err.OperationalError as exc:
+                if exc.args[0] != 1060:
+                    raise
     conn.execute(
         "UPDATE app_meta SET value = %s WHERE `key` = 'schema_version'",
         (str(_SCHEMA_VERSION),),
@@ -556,7 +567,8 @@ def _load_envelopes(conn: DbConnection) -> list[dict]:
         """
         SELECT deal_id, envelope_id, envelope_name, created_at,
                pedidos_plune_criados, pedidos_plune_aprovados, pedido_plune_id,
-               template_file_id, template_local_path
+               template_file_id, template_local_path,
+               parceiro_plune_criado, hub_pedido_criado, pedido_hub_id
         FROM envelopes_pending
         ORDER BY created_at
         """
@@ -574,6 +586,9 @@ def _load_envelopes(conn: DbConnection) -> list[dict]:
             "pedido_plune_id": r["pedido_plune_id"],
             "template_file_id": r.get("template_file_id"),
             "template_local_path": r.get("template_local_path"),
+            "parceiro_plune_criado": bool(r.get("parceiro_plune_criado")),
+            "hub_pedido_criado": bool(r.get("hub_pedido_criado")),
+            "pedido_hub_id": r.get("pedido_hub_id"),
         }
         for r in rows
     ]
@@ -586,26 +601,132 @@ def salvar_envelope_pendente(
     *,
     template_file_id: str | int | None = None,
     template_local_path: str | None = None,
+    parceiro_plune_criado: bool = False,
 ) -> None:
+    """Grava/atualiza envelope Clicksign sem apagar flags Plune/HUB já persistidas."""
     deal_id = str(deal_id)
+    existente = buscar_por_deal_id(deal_id)
+    tpl_id = str(template_file_id) if template_file_id is not None else None
+    tpl_path = str(template_local_path) if template_local_path else None
+    parceiro_flag = 1 if parceiro_plune_criado else 0
+
+    if existente:
+        if existente.get("parceiro_plune_criado") or parceiro_plune_criado:
+            parceiro_flag = 1
+        with db_conn() as conn:
+            conn.execute(
+                """
+                UPDATE envelopes_pending SET
+                    envelope_id = %s,
+                    envelope_name = %s,
+                    template_file_id = %s,
+                    template_local_path = %s,
+                    parceiro_plune_criado = %s
+                WHERE deal_id = %s
+                """,
+                (
+                    envelope_id,
+                    envelope_name,
+                    tpl_id,
+                    tpl_path,
+                    parceiro_flag,
+                    deal_id,
+                ),
+            )
+        return
+
+    plune_ja = deal_id in carregar_pedidos_plune_criados()
     with db_conn() as conn:
         conn.execute(
             """
-            REPLACE INTO envelopes_pending (
+            INSERT INTO envelopes_pending (
                 deal_id, envelope_id, envelope_name, created_at,
                 pedidos_plune_criados, pedidos_plune_aprovados, pedido_plune_id,
-                template_file_id, template_local_path
-            ) VALUES (%s, %s, %s, %s, 0, 0, NULL, %s, %s)
+                template_file_id, template_local_path,
+                parceiro_plune_criado, hub_pedido_criado, pedido_hub_id
+            ) VALUES (%s, %s, %s, %s, %s, 0, NULL, %s, %s, %s, 0, NULL)
             """,
             (
                 deal_id,
                 envelope_id,
                 envelope_name,
                 _utc_now(),
-                (str(template_file_id) if template_file_id is not None else None),
-                (str(template_local_path) if template_local_path else None),
+                1 if plune_ja else 0,
+                tpl_id,
+                tpl_path,
+                parceiro_flag,
             ),
         )
+
+
+def garantir_envelope_para_hub(
+    deal_id: str, *, parceiro_plune_criado: bool = False
+) -> None:
+    """
+    Garante linha em envelopes_pending para flags HUB/Plune (ex.: DEV sem Clicksign).
+    Não sobrescreve envelope Clicksign real se já existir.
+    """
+    deal_id = str(deal_id).strip()
+    if buscar_por_deal_id(deal_id):
+        if parceiro_plune_criado:
+            marcar_parceiro_plune_criado(deal_id, True)
+        return
+    salvar_envelope_pendente(
+        deal_id,
+        f"sem-envelope-{deal_id}",
+        f"Deal {deal_id} (registro automação sem Clicksign)",
+        parceiro_plune_criado=parceiro_plune_criado,
+    )
+
+
+def marcar_parceiro_plune_criado(deal_id: str, criado: bool) -> None:
+    """Atualiza flag de parceiro novo no Plune (ganho) para gate do HUB pós-assinatura."""
+    deal_id = str(deal_id)
+    with db_conn() as conn:
+        conn.execute(
+            """
+            UPDATE envelopes_pending
+            SET parceiro_plune_criado = %s
+            WHERE deal_id = %s
+            """,
+            (1 if criado else 0, deal_id),
+        )
+
+
+def marcar_hub_pedido_criado(deal_id: str, pedido_hub_id: int) -> None:
+    deal_id = str(deal_id)
+    with db_conn() as conn:
+        conn.execute(
+            """
+            UPDATE envelopes_pending
+            SET hub_pedido_criado = 1, pedido_hub_id = %s
+            WHERE deal_id = %s
+            """,
+            (int(pedido_hub_id), deal_id),
+        )
+
+
+def obter_estado_hub_deal(deal_id: str) -> dict | None:
+    """Lê flags HUB/Plune do envelope antes de limpar estado (rm deal)."""
+    deal_id = str(deal_id).strip()
+    if not deal_id:
+        return None
+    with db_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT parceiro_plune_criado, hub_pedido_criado, pedido_hub_id
+            FROM envelopes_pending
+            WHERE deal_id = %s
+            """,
+            (deal_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "parceiro_plune_criado": bool(row.get("parceiro_plune_criado")),
+        "hub_pedido_criado": bool(row.get("hub_pedido_criado")),
+        "pedido_hub_id": row.get("pedido_hub_id"),
+    }
 
 
 def limpar_template_local_envelope(deal_id: str) -> None:
@@ -832,6 +953,14 @@ def limpar_estado_deal(deal_id: str) -> dict[str, int]:
     if not deal_id:
         return {}
     stats: dict[str, int] = {}
+    hub_stats: dict[str, int] = {}
+    try:
+        from .hub_pedido import remover_pedido_hub_por_deal
+
+        hub_stats = remover_pedido_hub_por_deal(deal_id)
+    except Exception:
+        hub_stats = {"hub_pedido": 0}
+    stats.update(hub_stats)
     with db_conn() as conn:
         cur = conn.execute(
             "DELETE FROM deals_processed WHERE deal_id = %s", (deal_id,)

@@ -55,8 +55,26 @@ class TestListarArquivosDeal:
         resp = MagicMock(ok=True, status_code=200)
         resp.json.return_value = {
             "data": [{"id": 1}, {"id": 2}],
+            "additional_data": {"pagination": {"more_items_in_collection": False}},
         }
         mock_get.return_value = resp
+        assert len(listar_arquivos_deal("565")) == 2
+
+    @patch("core.pipedrive_files.requests.get")
+    def test_lista_paginada(self, mock_get):
+        page1 = MagicMock(ok=True, status_code=200)
+        page1.json.return_value = {
+            "data": [{"id": 1}],
+            "additional_data": {
+                "pagination": {"more_items_in_collection": True, "next_start": 1},
+            },
+        }
+        page2 = MagicMock(ok=True, status_code=200)
+        page2.json.return_value = {
+            "data": [{"id": 2}],
+            "additional_data": {"pagination": {"more_items_in_collection": False}},
+        }
+        mock_get.side_effect = [page1, page2]
         assert len(listar_arquivos_deal("565")) == 2
 
     @patch("core.pipedrive_files.requests.get")
