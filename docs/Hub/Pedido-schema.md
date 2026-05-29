@@ -76,9 +76,10 @@ Automação: um registro com o ID do pedido Plune **recorrente** apenas.
 Usada para validar P1/P2:
 
 ```sql
-SELECT Codigo, cod_cliente, Ref_Cliente, IDENTIFICACAO, NUC
-FROM instalacao
-WHERE Codigo = ? AND cod_cliente = ?;
+-- P1: valida CODIGO + COD_CLIENTE
+SELECT 1 FROM instalacao WHERE CODIGO = ? AND COD_CLIENTE = ? LIMIT 1;
+-- Observações «UC = …»: resolve CODIGO por IDENTIFICACAO + COD_CLIENTE
+SELECT CODIGO FROM instalacao WHERE IDENTIFICACAO = ? AND COD_CLIENTE = ? LIMIT 1;
 ```
 
 ## Catálogos auxiliares

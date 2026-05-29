@@ -10,6 +10,7 @@ from core.pipedrive_fields import (
     FIELD_GESTAO_ACL,
     FIELD_INDICADORES_QUALIDADE,
     FIELD_INSCRICAO_ESTADUAL,
+    FIELD_NOME_CLIENTE,
     FIELD_PERCENTUAL_EXITO,
     FIELD_QTD_SOLE,
     FIELD_QUALIDADE_ENERGIA,
@@ -49,6 +50,52 @@ def test_sole_consultoria_no_contexto(
     assert contexto["percentual_exito"] == "15%"
     assert "indicadores_qualidade" not in contexto
     assert "quatro" not in contexto["sole_web"].lower()
+    assert contexto["nome_fantasia"] == ""
+
+
+@patch("core.automacao_contrato.get_enum_label", return_value="15%")
+@patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
+@patch("core.automacao_contrato.DocxTemplate")
+@patch("core.automacao_contrato.os.path.exists", return_value=True)
+def test_sem_plune_usa_contratante_para_razao_e_fantasia(
+    mock_exists, mock_docx_cls, mock_parceiro, _enum_label
+):
+    deal = {
+        "id": 746,
+        "title": "Teste",
+        "custom_fields": {FIELD_NOME_CLIENTE: "Teste testando"},
+    }
+    mock_parceiro.return_value = None
+    doc = MagicMock()
+    mock_docx_cls.return_value = doc
+
+    fill_contract(deal)
+
+    contexto = doc.render.call_args[0][0]
+    assert contexto["nome_cliente"] == "Teste testando"
+    assert contexto["nome_fantasia"] == "Teste testando"
+
+
+@patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
+@patch("core.automacao_contrato.DocxTemplate")
+@patch("core.automacao_contrato.os.path.exists", return_value=True)
+def test_nome_fantasia_do_plune(mock_exists, mock_docx_cls, mock_parceiro):
+    deal = {"id": 746, "title": "Teste", "custom_fields": {}}
+    mock_parceiro.return_value = {
+        "razao_social": "RAZAO LTDA",
+        "nome_fantasia": "Marca Fantasia",
+        "documento_formatado": "12.345.678/0001-90",
+        "endereco": "Rua A",
+        "cidade": "Curitiba",
+    }
+    doc = MagicMock()
+    mock_docx_cls.return_value = doc
+
+    fill_contract(deal)
+
+    contexto = doc.render.call_args[0][0]
+    assert contexto["nome_cliente"] == "RAZAO LTDA"
+    assert contexto["nome_fantasia"] == "Marca Fantasia"
 
 
 @patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")

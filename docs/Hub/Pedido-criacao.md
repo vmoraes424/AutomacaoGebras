@@ -15,15 +15,15 @@ Guia para o INSERT de pedido no SOLE HUB, espelhando [`PedidoServices.Salvar`](.
 
 1. `parceiro_plune_criado = 0` em `envelopes_pending` (parceiro já existia no Plune no ganho).
 2. Pipedrive: **P1** (código instalação) e **P2** (código cliente) numéricos e consistentes com `instalacao`.
-3. Ao menos um serviço com UC > 0 no deal (mapeamento em [Mapeamento-Pipedrive.md](Mapeamento-Pipedrive.md)).
+3. **Observações (Detalhes)** **obrigatório** no formato `UC = ... = <valor BR>; ...` (ex.: `1.500,92`; UCs separadas por `;`) — ver [Mapeamento-Pipedrive.md](Mapeamento-Pipedrive.md); sem isso o deal é reaberto no ganho; UCs devem coincidir com P1.
 4. Pedidos Plune já existem (números para `pedido_plune`).
 5. `HUB_CODIGO_USUARIO_SISTEMA` configurado no `.env` (padrão **-3** = usuário `AUTOMACAO` / automação Pipedrive no HUB).
 
 ## Ordem dos INSERTs
 
 1. **`pedido`** — cabeçalho (`codigoSituacao=0`, `valorTotal` = valor recorrência).
-2. **`pedido_instalacao_extra`** — uma linha por código em P1 (vírgulas = várias instalações); valor repartido entre elas.
-3. **`pedido_instalacao_servico`** — mesmos serviços (UC > 0) em cada instalação.
+2. **`pedido_instalacao_extra`** — uma linha por UC do texto em Observações; valor do bloco `= ...`.
+3. **`pedido_instalacao_servico`** — serviços listados após `-` em cada bloco UC (nomes validados no catálogo HUB).
 4. **`pedido_plune`** — **apenas** ID do pedido Plune **recorrente**.
 
 Implementação: [`core/hub_pedido.py`](../../core/hub_pedido.py) (`criar_pedido_hub`).

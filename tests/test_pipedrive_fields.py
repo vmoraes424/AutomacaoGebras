@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from core.pipedrive_fields import (
+    FIELD_NUMERO_CONTRATO_P1,
+    FIELD_NUMERO_CONTRATO_P2,
     formatar_data_ptbr,
     formatar_decimal_plune,
+    get_numero_contrato,
     normalizar_cep,
     normalizar_documento,
     normalizar_nome,
+    sufixo_ano_contrato_gebras,
 )
 
 
@@ -49,3 +53,33 @@ class TestFormatarDecimalPlune:
 
     def test_invalido(self):
         assert formatar_decimal_plune("abc") == ""
+
+
+class TestNumeroContrato:
+    def test_sufixo_ano_dois_digitos(self):
+        assert sufixo_ano_contrato_gebras(ano=2026) == "n1r0a26"
+        assert sufixo_ano_contrato_gebras(ano=2027) == "n1r0a27"
+        assert sufixo_ano_contrato_gebras(ano=2030) == "n1r0a30"
+
+    def test_montagem_com_p1_p2(self):
+        deal = {
+            "custom_fields": {
+                FIELD_NUMERO_CONTRATO_P1: "00665,01942",
+                FIELD_NUMERO_CONTRATO_P2: "352",
+            }
+        }
+        assert get_numero_contrato(deal) == "CGRc00665i352n1r0a26"
+        deal["custom_fields"][FIELD_NUMERO_CONTRATO_P1] = "665; 1942"
+        assert get_numero_contrato(deal) == "CGRc665i352n1r0a26"
+
+    def test_p1_p2_vazios_usam_placeholder(self):
+        deal = {"custom_fields": {}}
+        assert get_numero_contrato(deal) == "CGRcXXXiXXXn1r0a26"
+
+    def test_apenas_p1_vazio(self):
+        deal = {
+            "custom_fields": {
+                FIELD_NUMERO_CONTRATO_P2: "352",
+            }
+        }
+        assert get_numero_contrato(deal).startswith("CGRcXXXi352")

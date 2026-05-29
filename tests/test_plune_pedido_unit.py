@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.pipedrive_fields import get_numero_contrato
 from core.plune_pedido import (
     TIPO_PEDIDO_IMPLANTACAO,
     TIPO_PEDIDO_RECORRENTE,
@@ -71,9 +72,8 @@ class TestDescricaoPedido:
                 FIELD_NUMERO_CONTRATO_P2: "456",
             },
         }
-        assert (
-            _descricao_pedido_plune(deal, TIPO_PEDIDO_IMPLANTACAO)
-            == "CGRc123i456n1r0a26"
+        assert _descricao_pedido_plune(deal, TIPO_PEDIDO_IMPLANTACAO) == get_numero_contrato(
+            deal
         )
 
     def test_recorrente_apenas_codigo_contrato(self):
@@ -84,9 +84,8 @@ class TestDescricaoPedido:
                 FIELD_NUMERO_CONTRATO_P2: "456",
             },
         }
-        assert (
-            _descricao_pedido_plune(deal, TIPO_PEDIDO_RECORRENTE)
-            == "CGRc123i456n1r0a26"
+        assert _descricao_pedido_plune(deal, TIPO_PEDIDO_RECORRENTE) == get_numero_contrato(
+            deal
         )
 
 
@@ -358,7 +357,15 @@ class TestAtualizarPedidosPlune:
         mock_params.return_value = {
             "BranchId": "751",
             "ClienteId": "999",
-            "Descricao": "CGRc123i456n1r0a26",
+            "Descricao": get_numero_contrato(
+                {
+                    "id": 746,
+                    "custom_fields": {
+                        "14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b": "123",
+                        "41a3157128d51e2fc803eeec4b242efafcb55b4e": "456",
+                    },
+                }
+            ),
             "StatusPedido": "31",
             "Serie": "1",
             "ModeloId": "01",

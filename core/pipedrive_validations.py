@@ -6,6 +6,7 @@ from .config import PIPEDRIVE_API_TOKEN, PLUNE_CENTRO_CUSTO_ID
 from .database import default_branch_id, filial_tem_mapeamento
 from .pipedrive_fields import (
     CAMPOS_CONTRATO_OBRIGATORIOS,
+    CAMPOS_CONTRATO_OPCIONAIS,
     CAMPOS_SERVICO_UC,
     FIELD_DOCUMENTO,
     FIELD_FILIAL,
@@ -19,6 +20,7 @@ from .pipedrive_fields import (
     resolver_branch_id,
     settings_por_branch,
 )
+from .hub_pedido import erros_validacao_observacoes_hub
 from .plune_catalog import resolver_subcentro, sincronizar_subcentros_de_pedidos
 
 
@@ -177,7 +179,7 @@ def validar_deal_para_automacao(deal: dict) -> None:
     erros: list[str] = []
 
     for label, field_code, tipo in CAMPOS_CONTRATO_OBRIGATORIOS:
-        if field_code == FIELD_FILIAL:
+        if field_code == FIELD_FILIAL or field_code in CAMPOS_CONTRATO_OPCIONAIS:
             continue
         msg = _validar_campo_contrato(deal, label, field_code, tipo)
         if msg:
@@ -234,6 +236,8 @@ def validar_deal_para_automacao(deal: dict) -> None:
             "(SOLE Web, Sole Consultoria, Gestão ACL, Usina ou Gestão da Qualidade de Energia)."
         )
 
+    erros.extend(erros_validacao_observacoes_hub(deal))
+
     if erros:
         raise DealValidationError(deal_id, erros)
 
@@ -280,7 +284,8 @@ def reabrir_deal_com_erros(deal_id: str, erros: list[str]) -> None:
     nota = (
         "<p><strong>Automação Gebras:</strong> o card foi reaberto porque há "
         "campos obrigatórios inválidos ou ausentes na seção <strong>Contrato</strong> "
-        "(exceto Data/Valor de Implantação e Observações).</p>"
+        "(exceto Código da Instalação, Código Cliente, Datas/Valor de Implantação "
+        "e Observações).</p>"
         f"<ul>{itens}</ul>"
         "<p>Corrija os campos e marque o card como ganho novamente.</p>"
     )
