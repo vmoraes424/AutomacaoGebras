@@ -8,7 +8,9 @@ from core.pipedrive_fields import (
     CAMPOS_CONTRATO_OBRIGATORIOS,
     CAMPOS_CONTRATO_OPCIONAIS,
     FIELD_CEP,
+    FIELD_DATA_DE_IMPLANTACAO,
     FIELD_DATA_IMPLANTACAO,
+    FIELD_DATA_PAGAMENTO_IMPLANTACAO,
     FIELD_NUMERO_CONTRATO_P1,
     FIELD_NUMERO_CONTRATO_P2,
     FIELD_OBSERVACOES_DETALHES,
@@ -24,11 +26,13 @@ from core.pipedrive_validations import (
 @pytest.mark.parametrize(
     "field_code",
     [
+        FIELD_NUMERO_CONTRATO_P1,
+        FIELD_NUMERO_CONTRATO_P2,
+        FIELD_DATA_DE_IMPLANTACAO,
+        FIELD_DATA_PAGAMENTO_IMPLANTACAO,
         FIELD_DATA_IMPLANTACAO,
         FIELD_VALOR_IMPLANTACAO,
         FIELD_OBSERVACOES_DETALHES,
-        FIELD_NUMERO_CONTRATO_P1,
-        FIELD_NUMERO_CONTRATO_P2,
     ],
 )
 def test_campos_opcionais_nao_estao_na_lista_obrigatoria(field_code: str):

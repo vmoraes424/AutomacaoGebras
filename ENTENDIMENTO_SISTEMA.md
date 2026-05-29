@@ -20,6 +20,7 @@ Arquivos gerados na pasta `contratos/` seguem o padrão `Contrato_{id_do_deal}_{
 | `contrato_padrao.docx` | Modelo Word com placeholders consumidos pela biblioteca **docxtpl** (sintaxe tipo Jinja2). |
 | `contratos/` | Saída dos contratos preenchidos antes do envio à assinatura. |
 | MySQL `gebras_automacao` | Estado (deals processados, envelopes, pedidos Plune) e catálogo (filiais, subcentros). CLI: `scripts/automacao_db.py`. |
+| MySQL `gebras` (HUB) | Pedidos comerciais SOLE HUB (`MYSQL_DATABASE_HUB`). Ver [`docs/Hub/README.md`](docs/Hub/README.md). |
 | `criar_webhook.py` | Cria webhook na API v3 do Clicksign (eventos como assinatura e fechamento automático do envelope). |
 
 ## Fluxo resumido (`automacao_contrato.py`)
@@ -31,6 +32,14 @@ Arquivos gerados na pasta `contratos/` seguem o padrão `Contrato_{id_do_deal}_{
 5. **Signatários**: lê e-mails dos custom fields em **ordem fixa** (Coordenador Principal → Contato Principal → Gestor Gebras → Diretor Principal). Envelope no Clicksign só é criado se houver pelo menos um signatário com e-mail **e** `DEV_PULAR_CLICKSIGN` estiver desligado; com `DEV_PULAR_CLICKSIGN=true`, o envio ao Clicksign é ignorado (não exige signatários para concluir o fluxo de geração do arquivo e registro do deal).
 6. **Clicksign (API v3)** *(omitido se `DEV_PULAR_CLICKSIGN=true` no `.env`)*: cria envelope, envia o documento em Base64, etc. Em **desenvolvimento**, ativar `DEV_PULAR_CLICKSIGN` evita chamadas à API (e rate limit): o `.docx` continua sendo gerado em `contratos/`; combine com `TESTE_PLUNE_SEM_ASSINATURA=true` para ainda criar o pedido no Plune.
 7. **Plune**: ao liberar o pedido (em teste logo após o contrato, ou em produção após assinatura), o sistema cria dois `Venda.Pedido` por deal: `implantacao` (`PedidoIntegracao=<deal_id>-implantacao`, `StatusPedido=31`) e `recorrente` (`PedidoIntegracao=<deal_id>-recorrente`, `StatusPedido=33`). Ambos nascem com `FreteporConta=9` (`Sem Frete`). O `ParametroContabilId` depende da filial: Matriz (`BranchId=751`) usa recorrente `1077` e implantação `1440`; ISM (`BranchId=790`) usa recorrente `1102` e implantação `1436`.
+8. **HUB (SOLE Hub)**: se o parceiro **já existia** no Plune no ganho (`parceiro_plune_criado=0`), a automação cria pedido no HUB (`core/hub_pedido.py`, `MYSQL_DATABASE_HUB`). Parceiro **novo** no Plune no ganho → **não** cria HUB. P1/P2 no Pipedrive = instalação/cliente no HUB. **Produção** (`DEV_HUB_SEM_APROVACAO_PLUNE=false`): HUB após envelope fechado e `aprovar_pedidos_plune`. **Dev** (`DEV_HUB_SEM_APROVACAO_PLUNE=true`): HUB logo após `criar_pedido_plune` / `atualizar_pedidos_plune` no ganho. `rm deal` remove pedido HUB criado pela automação. Detalhes: [`docs/Hub/`](docs/Hub/).
+
+## Variável `DEV_HUB_SEM_APROVACAO_PLUNE`
+
+| Valor | Quando cria pedido no HUB |
+|-------|---------------------------|
+| `false` (produção) | Após assinatura Clicksign e aprovação dos pedidos no Plune |
+| `true` (dev) | Logo após criar/atualizar pedidos Plune no ganho do deal |
 
 ## Variável `DEV_PULAR_CLICKSIGN` (desenvolvimento)
 

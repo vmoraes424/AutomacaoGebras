@@ -12,6 +12,7 @@ import traceback
 import requests
 import base64
 import hashlib
+import glob
 from datetime import datetime, timedelta, timezone
 from docxtpl import DocxTemplate
 
@@ -27,8 +28,13 @@ from core.config import (
     PIPEDRIVE_API_TOKEN,
     CORTE_TEMPORAL_GRACE_MINUTOS,
     TESTE_PLUNE_SEM_ASSINATURA,
+    DEV_HUB_SEM_APROVACAO_PLUNE,
 )
-from core.database import carregar_deals_processados, salvar_deal_processado
+from core.database import (
+    carregar_deals_processados,
+    garantir_envelope_para_hub,
+    salvar_deal_processado,
+)
 from core.envelope_state import (
     carregar_pedidos_plune_criados,
     buscar_por_deal_id,
@@ -47,7 +53,10 @@ from core.plune_pedido import (
     formatar_linha_pedidos_plune_contrato,
     obter_numeros_pedidos_plune_deal,
 )
-from core.pipedrive_stages import garantir_deal_em_etapa_negociacao
+from core.pipedrive_stages import (
+    garantir_deal_em_etapa_contrato,
+    garantir_deal_em_etapa_negociacao,
+)
 from core.pipedrive_validations import (
     DealValidationError,
     reabrir_deal_com_erros,
@@ -67,7 +76,6 @@ from core.pipedrive_fields import (
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_INDICADORES_QUALIDADE,
     FIELD_INSCRICAO_ESTADUAL,
-    FIELD_NOME_CLIENTE,
     FIELD_PERCENTUAL_EXITO,
     FIELD_QTD_SOLE,
     FIELD_QUALIDADE_ENERGIA,
@@ -78,6 +86,7 @@ from core.pipedrive_fields import (
     formatar_data_ptbr,
     formatar_quantidade_uc,
     get_enum_label,
+    get_nome_cliente,
     get_numero_contrato,
     get_val,
 )
@@ -521,7 +530,6 @@ def fill_contract(
         print(f"[!] Erro ao abrir docx: {e}")
         return None
 
-    numero_contrato = get_numero_contrato(deal_data)
     qtd_sole = get_val(deal_data, FIELD_QTD_SOLE)
     sole_consultoria = get_val(deal_data, FIELD_QUALIDADE_ENERGIA)
     qualidade_energia_uc = get_val(deal_data, FIELD_INDICADORES_QUALIDADE)
@@ -545,21 +553,24 @@ def fill_contract(
     )
 
     documento_pipe = get_val(deal_data, FIELD_DOCUMENTO)
-    nome_pipe = get_val(deal_data, FIELD_NOME_CLIENTE)
+    contratante = get_nome_cliente(deal_data)
     parceiro_plune = None
     try:
-        parceiro_plune = buscar_parceiro_plune_por_documento(documento_pipe, nome_pipe)
+        parceiro_plune = buscar_parceiro_plune_por_documento(documento_pipe, contratante)
     except PluneError as e:
         print(f"[!] Aviso: busca Plune por CNPJ falhou ({e}); usando dados do Pipedrive no contrato.")
 
     if parceiro_plune:
-        nome_cliente = parceiro_plune.get("razao_social") or nome_pipe
+        nome_cliente = parceiro_plune.get("razao_social") or contratante
+        nome_fantasia = (parceiro_plune.get("nome_fantasia") or "").strip()
         endereco = parceiro_plune.get("endereco") or get_val(deal_data, FIELD_ENDERECO)
         cidade = parceiro_plune.get("cidade") or get_val(deal_data, FIELD_CIDADE)
         documento = parceiro_plune.get("documento_formatado") or documento_pipe
         print(f"[*] Contrato com dados do Plune: {nome_cliente} ({documento})")
     else:
-        nome_cliente = nome_pipe
+        # Cliente ainda não no Plune: razão social e nome fantasia = Contratante (Pipedrive)
+        nome_cliente = contratante
+        nome_fantasia = contratante
         endereco = get_val(deal_data, FIELD_ENDERECO)
         cidade = get_val(deal_data, FIELD_CIDADE)
         documento = documento_pipe
@@ -577,9 +588,10 @@ def fill_contract(
                 )
 
     contexto = {
-        "numero_contrato": numero_contrato,
+        "numero_contrato": get_numero_contrato(deal_data),
         "numeros_pedidos": formatar_linha_pedidos_plune_contrato(numeros_pedidos),
         "nome_cliente": nome_cliente,
+        "nome_fantasia": nome_fantasia,
         "endereco": endereco,
         "cidade": cidade,
         "documento": documento,
@@ -613,16 +625,93 @@ def fill_contract(
     return nome_saida
 
 
+_PASTA_TEMPLATES_RUNTIME = os.path.join("runtime", "templates")
+_GLOB_TEMPLATE_DEAL = "template_*_{deal_id}_*.docx"
+
+
+def _remover_arquivo_template_local(caminho: str) -> bool:
+    path = str(caminho or "").strip()
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        os.remove(path)
+        return True
+    except OSError as exc:
+        print(f"[!] Falha ao remover template local {path!r}: {exc}", flush=True)
+        return False
+
+
+def limpar_templates_locais_deal(deal_id: str, *, manter: str | None = None) -> int:
+    """Remove templates baixados do Pipedrive para o deal, exceto ``manter``."""
+    deal_id = str(deal_id).strip()
+    if not deal_id or not os.path.isdir(_PASTA_TEMPLATES_RUNTIME):
+        return 0
+
+    manter_norm = os.path.normpath(manter) if manter else None
+    pattern = os.path.join(
+        _PASTA_TEMPLATES_RUNTIME, _GLOB_TEMPLATE_DEAL.format(deal_id=deal_id)
+    )
+    removidos = 0
+    for caminho in glob.glob(pattern):
+        caminho_norm = os.path.normpath(caminho)
+        if manter_norm and caminho_norm == manter_norm:
+            continue
+        if _remover_arquivo_template_local(caminho_norm):
+            removidos += 1
+    return removidos
+
+
+def limpar_templates_orfaos_runtime() -> int:
+    """
+    Remove arquivos em runtime/templates que não estão referenciados em
+    envelopes_pending.template_local_path (restos de regenerações anteriores).
+    """
+    if not os.path.isdir(_PASTA_TEMPLATES_RUNTIME):
+        return 0
+
+    from core.database import db_conn
+
+    ativos: set[str] = set()
+    with db_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT template_local_path
+            FROM envelopes_pending
+            WHERE template_local_path IS NOT NULL AND template_local_path <> ''
+            """
+        ).fetchall()
+    for row in rows:
+        path = str(row.get("template_local_path") or "").strip()
+        if path:
+            ativos.add(os.path.normpath(path))
+
+    removidos = 0
+    for caminho in glob.glob(os.path.join(_PASTA_TEMPLATES_RUNTIME, "template_*.docx")):
+        caminho_norm = os.path.normpath(caminho)
+        if caminho_norm in ativos:
+            continue
+        if _remover_arquivo_template_local(caminho_norm):
+            removidos += 1
+
+    if removidos:
+        print(
+            f"[*] Templates: {removidos} arquivo(s) órfão(s) removido(s) "
+            f"de {_PASTA_TEMPLATES_RUNTIME}.",
+            flush=True,
+        )
+    return removidos
+
+
 def _salvar_template_deal_local(
     *, deal_id: str, won_time: str, file_id: int, nome: str, conteudo: bytes
 ) -> str:
-    pasta = os.path.join("runtime", "templates")
-    os.makedirs(pasta, exist_ok=True)
+    os.makedirs(_PASTA_TEMPLATES_RUNTIME, exist_ok=True)
     sufixo = hashlib.sha1(str(won_time).encode("utf-8")).hexdigest()[:10]
     base = os.path.splitext(os.path.basename(nome or "contrato_padrao.docx"))[0]
     safe_base = base.replace("/", "-").replace("\\", "-").strip() or "contrato_padrao"
     caminho = os.path.join(
-        pasta, f"template_{safe_base}_{deal_id}_{file_id}_{sufixo}.docx"
+        _PASTA_TEMPLATES_RUNTIME,
+        f"template_{safe_base}_{deal_id}_{file_id}_{sufixo}.docx",
     )
     with open(caminho, "wb") as f:
         f.write(conteudo)
@@ -646,6 +735,39 @@ def buscar_deals_ganhos():
     except Exception as e:
         print(f"[!] Falha na conexão com Pipedrive: {e}")
         return []
+
+
+def _fluxo_hub_pre_aprovacao(
+    deal_id: str,
+    parceiro_criado_plune: bool,
+    *,
+    numeros_pedidos: dict[str, str] | None = None,
+) -> None:
+    """
+    Antes da aprovação Plune (ganho / regeneração com troca de contrato e valores).
+
+    - Dev (DEV_HUB_SEM_APROVACAO_PLUNE=true): cria na 1ª vez e atualiza a cada regeneração.
+    - Produção: não cria; só atualiza se o pedido HUB já existir (ex.: teste com flag dev).
+      Criação em processar_contratos_assinados, após aprovar_pedidos_plune.
+    """
+    if numeros_pedidos is not None and not any(
+        str(v).strip() for v in numeros_pedidos.values() if v is not None
+    ):
+        print(
+            f"[*] HUB: sem números de pedido Plune — deal {deal_id} (aguardar Plune).",
+            flush=True,
+        )
+        return
+    garantir_envelope_para_hub(
+        deal_id, parceiro_plune_criado=parceiro_criado_plune
+    )
+    from core.hub_pedido import tentar_sincronizar_pedido_hub_deal
+
+    tentar_sincronizar_pedido_hub_deal(
+        deal_id,
+        parceiro_plune_criado=parceiro_criado_plune,
+        permitir_criacao=DEV_HUB_SEM_APROVACAO_PLUNE,
+    )
 
 
 def log_resultado_plune(deal_id: str, result: dict) -> None:
@@ -718,6 +840,7 @@ def criar_pedidos_plune_no_ganho(deal_id: str, contexto_envio: str) -> None:
 
 def processar_deals_pendentes():
     """Função principal executada a cada ciclo do loop."""
+    limpar_templates_orfaos_runtime()
     deals = buscar_deals_ganhos()
     if not deals:
         print(
@@ -824,6 +947,7 @@ def processar_deals_pendentes():
 
             # Plune: criar ou atualizar pedidos antes do contrato
             numeros_pedidos: dict[str, str] = {}
+            parceiro_criado_plune = False
             if registro:
                 print(
                     f"    -> Regeneração: atualizando pedidos no Plune (deal {deal_id})...",
@@ -835,6 +959,11 @@ def processar_deals_pendentes():
                     result_plune = atualizar_pedidos_plune(deal_id)
                     log_resultado_plune(deal_id, result_plune)
                     numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+                    _fluxo_hub_pre_aprovacao(
+                        deal_id,
+                        bool(registro.get("parceiro_plune_criado")),
+                        numeros_pedidos=numeros_pedidos,
+                    )
                 except DealValidationError as validation_error:
                     print(
                         f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
@@ -858,6 +987,7 @@ def processar_deals_pendentes():
                 )
                 try:
                     result_plune = criar_pedido_plune(deal_id, anexar_contrato=False)
+                    parceiro_criado_plune = bool(result_plune.get("parceiro_criado"))
                     log_resultado_plune(deal_id, result_plune)
                     # Se o MySQL local já marca o pedido como criado, mas o deal não tem
                     # registro de envelope pendente (registro=None), tratamos como
@@ -875,6 +1005,11 @@ def processar_deals_pendentes():
                         result_plune = atualizar_pedidos_plune(deal_id)
                         log_resultado_plune(deal_id, result_plune)
                     numeros_pedidos = extrair_numeros_pedidos_plune(result_plune)
+                    _fluxo_hub_pre_aprovacao(
+                        deal_id,
+                        parceiro_criado_plune,
+                        numeros_pedidos=numeros_pedidos,
+                    )
                 except DealValidationError as validation_error:
                     print(
                         f"[!] Deal {deal_id}: parceiro novo no Plune exige CEP no Pipedrive; reabrindo card.",
@@ -908,6 +1043,15 @@ def processar_deals_pendentes():
                         nome=nome_tpl,
                         conteudo=conteudo_tpl,
                     )
+                    removidos = limpar_templates_locais_deal(
+                        deal_id, manter=template_path
+                    )
+                    if removidos:
+                        print(
+                            f"[*] Deal {deal_id}: {removidos} template(s) antigo(s) "
+                            f"removido(s) de runtime/templates.",
+                            flush=True,
+                        )
                     print(
                         f"[*] Deal {deal_id}: usando template do Pipedrive "
                         f"(file_id={file_id}, nome={nome_tpl!r}).",
@@ -969,12 +1113,18 @@ def processar_deals_pendentes():
                         doc_path, envelope_name, sequence_dinamica
                     )
 
+                    parceiro_para_envelope = parceiro_criado_plune
+                    if registro:
+                        parceiro_para_envelope = bool(
+                            registro.get("parceiro_plune_criado")
+                        ) or parceiro_criado_plune
                     salvar_envelope_pendente(
                         deal_id,
                         envelope_id,
                         envelope_name,
                         template_file_id=template_file_id,
                         template_local_path=template_path,
+                        parceiro_plune_criado=parceiro_para_envelope,
                     )
                     salvar_deal_processado(deal_id, won_time_str)
                     algum_processado = True
@@ -1060,11 +1210,34 @@ def processar_contratos_assinados():
             log_resultado_plune(deal_id, result)
             if result.get("status") in ("approved", "skipped"):
                 marcar_pedidos_aprovados(deal_id)
+                try:
+                    if garantir_deal_em_etapa_contrato({"id": deal_id}):
+                        print(
+                            f"[*] Pipedrive: deal {deal_id} movido para etapa Contrato.",
+                            flush=True,
+                        )
+                except Exception as exc:
+                    print(
+                        f"[!] Pipedrive: falha ao mover deal {deal_id} "
+                        f"para etapa Contrato: {exc}",
+                        flush=True,
+                    )
+                from core.hub_pedido import tentar_criar_pedido_hub_deal
+
+                registro_hub = buscar_por_deal_id(deal_id)
+                tentar_criar_pedido_hub_deal(
+                    deal_id,
+                    parceiro_plune_criado=(
+                        bool(registro_hub.get("parceiro_plune_criado"))
+                        if registro_hub
+                        else None
+                    ),
+                )
                 # Cleanup do template local usado para gerar o contrato (somente após anexar assinado).
                 try:
                     path_tpl = str(record.get("template_local_path") or "").strip()
-                    if path_tpl and os.path.exists(path_tpl):
-                        os.remove(path_tpl)
+                    _remover_arquivo_template_local(path_tpl)
+                    limpar_templates_locais_deal(deal_id)
                     if path_tpl:
                         limpar_template_local_envelope(deal_id)
                 except Exception as exc:
@@ -1109,6 +1282,11 @@ def main():
     if DEV_PULAR_CLICKSIGN:
         print(
             "[*] DEV_PULAR_CLICKSIGN=1 — a API Clicksign não é chamada (só gera o .docx no disco; use com TESTE_PLUNE_SEM_ASSINATURA em dev para ir ao Plune)."
+        )
+    if DEV_HUB_SEM_APROVACAO_PLUNE:
+        print(
+            "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune no ganho "
+            "(sem esperar aprovação Plune pós-assinatura)."
         )
     print(
         f"[*] Poll a cada {INTERVALO_POLLING_SEGUNDOS}s — cada ciclo imprime um resumo se nada novo ocorrer.\n"
