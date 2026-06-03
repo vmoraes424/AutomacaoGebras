@@ -116,11 +116,27 @@ def baixar_docx_contrato_padrao_deal(deal_id: str) -> tuple[bytes, str, int] | N
     conteudo, nome, _ = baixar_arquivo_pipedrive(file_id)
     return conteudo, nome, file_id
 
+_PROPOSTA_COMERCIAL_SUBSTR = "proposta comercial"
+
+
+def _nome_contem_proposta_comercial(meta: dict) -> bool:
+    nome = str(meta.get("name") or "").strip().lower()
+    return _PROPOSTA_COMERCIAL_SUBSTR in nome
+
+
+def tem_arquivo_proposta_comercial(arquivos: list[dict]) -> bool:
+    """True se algum anexo do deal tiver «Proposta Comercial» no nome (case-insensitive)."""
+    return any(_nome_contem_proposta_comercial(a) for a in arquivos)
+
+
 def escolher_pdf_proposta(arquivos: list[dict]) -> dict | None:
-    """Prioriza PDF com 'proposta' no nome; senão o primeiro PDF do deal."""
+    """Prioriza PDF com 'Proposta Comercial' no nome; senão PDF com 'proposta'; senão o primeiro PDF."""
     pdfs = [a for a in arquivos if _eh_pdf(a)]
     if not pdfs:
         return None
+    for arquivo in pdfs:
+        if _nome_contem_proposta_comercial(arquivo):
+            return arquivo
     for arquivo in pdfs:
         nome = str(arquivo.get("name") or "").lower()
         if "proposta" in nome:

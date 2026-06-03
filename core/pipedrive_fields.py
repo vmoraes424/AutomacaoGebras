@@ -18,8 +18,9 @@ FIELD_DOCUMENTO = "176d2a0d5167d1edc9b949c75f8b9a7597eabe91"
 FIELD_QTD_SOLE = "f9923cdce1274da8c10cec1b9ab561e024504620"
 FIELD_VALOR_MENSAL = "2a331c4b62c9d46aae9451af25eca2d08a3fdf0a"  # Valor Recorrência
 FIELD_VALOR_IMPLANTACAO = "015407d5106c321a227f1ca881f920fe2e1042ec"
-# Data de Implantação (varchar) — validado via API v2 dealFields
-FIELD_DATA_DE_IMPLANTACAO = "f40caca58878f19aefba960b87127753b7b932ca"
+# Inscrição Municipal (varchar, item 1.6 do quadro resumo) — antes «Data de Implantação» no Pipedrive
+FIELD_INSCRICAO_MUNICIPAL = "f40caca58878f19aefba960b87127753b7b932ca"
+FIELD_DATA_DE_IMPLANTACAO = FIELD_INSCRICAO_MUNICIPAL  # alias legado (campo renomeado no CRM)
 # Data de Pagamento da Implantação (date) — x1_PrevisaoCobranca / contrato Word
 FIELD_DATA_PAGAMENTO_IMPLANTACAO = "2b8f62a107891e26390459cfa4048b3eedade11b"
 FIELD_DATA_IMPLANTACAO = FIELD_DATA_PAGAMENTO_IMPLANTACAO  # alias legado
@@ -28,6 +29,7 @@ FIELD_INDICADORES_QUALIDADE = "ffb2d5aec9acdee5a242ca19683bbf4caa24cd53"
 FIELD_QUALIDADE_ENERGIA = "c0a23912d889e00f51ed5bd08a55856a7e5dc930"
 FIELD_GESTAO_ACL = "8f998d4877d478b3905c126d8b23f205d0686b77"
 FIELD_GESTAO_USINA_FOTOVOLTAICA = "1ba1794470354856aaca3e784349cd5f9f4d074e"
+FIELD_QUANTIDADE_UCS = "c6d1c300a1d070c1a54494a246f6330beabe36aa"
 
 # Campos numéricos de serviço (UCs) usados em contrato, comissão e observações Plune
 CAMPOS_SERVICO_UC = (
@@ -40,32 +42,29 @@ CAMPOS_SERVICO_UC = (
 FIELD_CONTATO_GESTOR = "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"
 FIELD_CONTATO_FINANCEIRO = "722da69afe31c1f8fa4f5457a223e2a952ae0978"
 FIELD_CONTATO_CONTRATANTE = "3002b2df87f0577585ebaec394fd09a38ca8778f"
+FIELD_CONTATO_PRINCIPAL = "a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6"
 FIELD_REGIONAL = "14855b5973f28e97dafd4e2abccc539d7461dc24"
 FIELD_SUBCENTRO_NIVEL_3 = "60ffe8e9c2aa51f717865559e86e6044bfb335e6"
+FIELD_EMAIL_CONSULTOR_GEBRAS = "3bacd163054a20c843e79bc525bebc1285773b17"
+FIELD_EMAIL_COORDENADOR_GEBRAS = "3a5c1d1dc1b5f023f57c65b9bf725c27d754d31b"
+FIELD_EMAIL_DIRETOR_GEBRAS = "a2eba4ca348f3597d570d84c356aa66e81d762cd"
+FIELD_EMAIL_COORDENADOR_LEGADO = "92359b129485b08fd024b8c28ef022e7635419a3"
+FIELD_EMAIL_DIRETOR_LEGADO = "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2"
 FIELD_FILIAL = "be20f11317ac66845bf97695f43e57795e26d01d"
 FIELD_INSCRICAO_ESTADUAL = "c3e623cfa197040b778400a8977ae2c8a8386024"
 FIELD_PERCENTUAL_EXITO = "225005fe8384d97183e5480781ea8ea82982301e"
 FIELD_OBSERVACOES_DETALHES = "4fba2f9323c64acdcac770e38f2c0cdb840796bc"
 
+# Grupo 1: Consultor. Comercial recebe e-mail informativo separado (aviso_comercial).
 SIGNER_FIELDS = [
-    ("Coordenador Principal", "92359b129485b08fd024b8c28ef022e7635419a3"),
-    ("Contato Principal", "a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6"),
-    ("Gestor Gebras", "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"),
-    ("Diretor Principal", "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2"),
+    ("Consultor", FIELD_EMAIL_CONSULTOR_GEBRAS, 1, FIELD_CONTATO_GESTOR),
+    ("Coordenador", FIELD_EMAIL_COORDENADOR_GEBRAS, 2, FIELD_EMAIL_COORDENADOR_LEGADO),
+    ("Cliente", FIELD_CONTATO_PRINCIPAL, 3, None),
+    ("Diretor", FIELD_EMAIL_DIRETOR_GEBRAS, 4, FIELD_EMAIL_DIRETOR_LEGADO),
 ]
 
 # Seção Contrato no Pipedrive: obrigatórios para automação, exceto CAMPOS_CONTRATO_OPCIONAIS
-CAMPOS_CONTRATO_OPCIONAIS = frozenset(
-    {
-        FIELD_NUMERO_CONTRATO_P1,
-        FIELD_NUMERO_CONTRATO_P2,
-        FIELD_DATA_DE_IMPLANTACAO,
-        FIELD_DATA_PAGAMENTO_IMPLANTACAO,
-        FIELD_DATA_IMPLANTACAO,
-        FIELD_VALOR_IMPLANTACAO,
-        FIELD_OBSERVACOES_DETALHES,
-    }
-)
+CAMPOS_CONTRATO_OPCIONAIS = frozenset({FIELD_OBSERVACOES_DETALHES})
 
 # (rótulo no Pipedrive, hash, tipo) — text | enum | email | cep | uc | money_mensal | date | documento
 CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
@@ -76,12 +75,22 @@ CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
     ("Município/Estado", FIELD_CIDADE, "text"),
     ("CPF/CNPJ", FIELD_DOCUMENTO, "documento"),
     ("Inscrição Estadual", FIELD_INSCRICAO_ESTADUAL, "text"),
+    ("Inscrição Municipal", FIELD_INSCRICAO_MUNICIPAL, "text"),
+    ("Código da Instalação", FIELD_NUMERO_CONTRATO_P1, "text"),
+    ("Código Cliente", FIELD_NUMERO_CONTRATO_P2, "text"),
     ("SOLE Web", FIELD_QTD_SOLE, "uc"),
     ("Sole Consultoria", FIELD_QUALIDADE_ENERGIA, "uc"),
     ("Gestão ACL - Mercado Livre de Energia", FIELD_GESTAO_ACL, "uc"),
     ("Gestão Usina Fotovoltaica", FIELD_GESTAO_USINA_FOTOVOLTAICA, "uc"),
     ("Gestão da Qualidade de Energia", FIELD_INDICADORES_QUALIDADE, "uc"),
+    ("Quantidade de UC's", FIELD_QUANTIDADE_UCS, "uc"),
     ("Valor Recorrência", FIELD_VALOR_MENSAL, "money_mensal"),
+    ("Valor de Implantação", FIELD_VALOR_IMPLANTACAO, "money_implantacao"),
+    (
+        "Data de Pagamento da Implantação",
+        FIELD_DATA_PAGAMENTO_IMPLANTACAO,
+        "date",
+    ),
     (
         "Data de Pagamento da Primeira Cobrança Mensal",
         FIELD_DATA_PRIMEIRA_COBRANCA,
@@ -90,10 +99,13 @@ CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
     ("Porcentagem de Exito", FIELD_PERCENTUAL_EXITO, "enum"),
     ("Sub Centro Nível 2", FIELD_REGIONAL, "enum"),
     ("Sub Centro Nível 3", FIELD_SUBCENTRO_NIVEL_3, "enum"),
-    ("E-mail Coordenador", "92359b129485b08fd024b8c28ef022e7635419a3", "email"),
-    ("E-mail Assinante do Contrato", "a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6", "email"),
+    ("E-mail Coordenador", FIELD_EMAIL_COORDENADOR_LEGADO, "email"),
+    ("E-mail Assinante do Contrato", FIELD_CONTATO_PRINCIPAL, "email"),
+    ("E-mail Consultor GEBRAS", FIELD_EMAIL_CONSULTOR_GEBRAS, "email"),
+    ("E-mail Coordenador GEBRAS", FIELD_EMAIL_COORDENADOR_GEBRAS, "email"),
     ("E-mail Gestor GEBRAS", FIELD_CONTATO_GESTOR, "email"),
-    ("E-mail Diretor", "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2", "email"),
+    ("E-mail Diretor GEBRAS", FIELD_EMAIL_DIRETOR_GEBRAS, "email"),
+    ("E-mail Diretor", FIELD_EMAIL_DIRETOR_LEGADO, "email"),
     ("Email Financeiro Contratante", FIELD_CONTATO_FINANCEIRO, "email"),
     ("E-mail Gestor Contratante", FIELD_CONTATO_CONTRATANTE, "email"),
 )
@@ -217,6 +229,29 @@ def get_nome_cliente(deal_data: dict) -> str:
     return get_val(deal_data, FIELD_NOME_CLIENTE).strip()
 
 
+def split_cidade_estado(texto: str) -> tuple[str, str]:
+    """Separa cidade e UF do campo Município/Estado (ex.: «Pelotas - RS, Brasil»)."""
+    texto = (texto or "").strip()
+    if not texto:
+        return "", ""
+    if "-" in texto:
+        cidade, resto = texto.split("-", 1)
+        resto = resto.strip()
+        if "," in resto:
+            estado = resto.split(",", 1)[0].strip()
+        else:
+            estado = resto
+        return cidade.strip(), estado
+    if "/" in texto:
+        cidade, estado = texto.rsplit("/", 1)
+        return cidade.strip(), estado.strip()
+    return texto, ""
+
+
+def get_cidade_estado(deal_data: dict) -> tuple[str, str]:
+    return split_cidade_estado(get_val(deal_data, FIELD_CIDADE))
+
+
 def get_documento(deal_data: dict) -> str:
     return get_val(deal_data, FIELD_DOCUMENTO).strip()
 
@@ -335,10 +370,69 @@ def buscar_deal_por_id(deal_id: str) -> dict | None:
 
 
 def extrair_signatarios(deal_data: dict) -> list:
-    cf = get_custom_fields(deal_data)
-    sign_sequence = []
-    for nome_cargo, chave in SIGNER_FIELDS:
-        email = cf.get(chave)
-        if email and str(email).strip():
-            sign_sequence.append({"name": nome_cargo, "email": str(email).strip()})
+    """Monta signatários Clicksign: Consultor → Coordenador → Cliente → Diretor."""
+    sign_sequence: list[dict] = []
+    emails_vistos: set[str] = set()
+
+    for nome_cargo, chave, grupo, chave_legado in SIGNER_FIELDS:
+        email = _email_signatario_deal(deal_data, chave, chave_legado)
+        email = (email or "").strip()
+        if not email:
+            continue
+        chave_email = email.casefold()
+        if chave_email in emails_vistos:
+            continue
+        emails_vistos.add(chave_email)
+        sign_sequence.append({"name": nome_cargo, "email": email, "group": grupo})
     return sign_sequence
+
+
+def _ids_opcao_campo(raw) -> list[str]:
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, list):
+        ids: list[str] = []
+        for item in raw:
+            if isinstance(item, dict):
+                val = item.get("id") or item.get("value")
+                if val is not None:
+                    ids.append(str(val))
+            elif item not in (None, ""):
+                ids.append(str(item))
+        return ids
+    if isinstance(raw, dict):
+        val = raw.get("id") or raw.get("value")
+        return [str(val)] if val is not None else []
+    return [str(raw).strip()]
+
+
+def _email_signatario_deal(
+    deal_data: dict, field_code: str, field_legado: str | None
+) -> str:
+    for code in (field_code, field_legado):
+        if not code:
+            continue
+        email = _email_de_hash_signatario(deal_data, code)
+        if email:
+            return email
+    return ""
+
+
+def _email_de_hash_signatario(deal_data: dict, field_code: str) -> str:
+    cf = get_custom_fields(deal_data)
+    raw = cf.get(field_code)
+    if raw is None or raw == "":
+        raw = deal_data.get(field_code)
+    if raw is None or raw == "":
+        return ""
+
+    if isinstance(raw, str) and "@" in raw:
+        return raw.strip()
+
+    for opt_id in _ids_opcao_campo(raw):
+        label = _enum_option_labels_for_field(field_code).get(opt_id, "").strip()
+        if label and "@" in label:
+            return label
+
+    texto = get_val(deal_data, field_code).strip()
+    return texto if "@" in texto else ""

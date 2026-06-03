@@ -8,9 +8,11 @@ from core.pipedrive_fields import (
     formatar_data_ptbr,
     formatar_decimal_plune,
     get_numero_contrato,
+    get_cidade_estado,
     normalizar_cep,
     normalizar_documento,
     normalizar_nome,
+    split_cidade_estado,
     sufixo_ano_contrato_gebras,
 )
 
@@ -84,3 +86,25 @@ class TestNumeroContrato:
             },
         }
         assert get_numero_contrato(deal) == "CGRc746i352n1r0a26"
+
+
+class TestSplitCidadeEstado:
+    def test_formato_pipedrive_hifen(self):
+        assert split_cidade_estado("Pelotas - RS, Brasil") == ("Pelotas", "RS")
+
+    def test_hifen_sem_pais(self):
+        assert split_cidade_estado("Curitiba - PR") == ("Curitiba", "PR")
+
+    def test_formato_legado_barra(self):
+        assert split_cidade_estado("Pelotas/RS") == ("Pelotas", "RS")
+
+    def test_sem_separador(self):
+        assert split_cidade_estado("Curitiba") == ("Curitiba", "")
+
+    def test_get_cidade_estado_do_deal(self):
+        deal = {
+            "custom_fields": {
+                "2bf3850e0a6dc7232f5f44197e79ffcc5642c1c5": "Pelotas - RS, Brasil"
+            }
+        }
+        assert get_cidade_estado(deal) == ("Pelotas", "RS")

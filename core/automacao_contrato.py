@@ -76,6 +76,7 @@ from core.pipedrive_fields import (
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_INDICADORES_QUALIDADE,
     FIELD_INSCRICAO_ESTADUAL,
+    FIELD_INSCRICAO_MUNICIPAL,
     FIELD_PERCENTUAL_EXITO,
     FIELD_QTD_SOLE,
     FIELD_QUALIDADE_ENERGIA,
@@ -88,9 +89,11 @@ from core.pipedrive_fields import (
     get_enum_label,
     get_nome_cliente,
     get_numero_contrato,
+    get_cidade_estado,
     get_val,
 )
 from core.pipedrive_files import baixar_docx_contrato_padrao_deal
+from core.aviso_comercial import enviar_aviso_comercial_etapa1
 
 # --- CONFIGURAÇÕES (ver config.py) ---
 API_TOKEN = PIPEDRIVE_API_TOKEN
@@ -486,18 +489,19 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: 
     print(
         f"[*] 3. Configurando {len(sign_sequence)} signatários (Sequencial por Grupos)..."
     )
-    first_signer_id = None
+    first_group = min((p.get("group", 1) for p in sign_sequence), default=1)
+    first_group_signer_ids: list[str] = []
 
     for i, person in enumerate(sign_sequence):
-        group_num = i + 1
+        group_num = person.get("group", i + 1)
         signer_id = cs.create_signer(
             envelope_id, person["name"], person["email"], group_num
         )
         cs.create_sign_requirement(envelope_id, signer_id, document_id)
         cs.create_auth_requirement(envelope_id, signer_id, document_id)
 
-        if i == 0:
-            first_signer_id = signer_id
+        if group_num == first_group:
+            first_group_signer_ids.append(signer_id)
         print(
             f"    > {person['name']} ({person['email']}) adicionado ao Grupo {group_num}."
         )
@@ -505,12 +509,27 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: 
     print("[*] 4. Ativando envelope...")
     cs.activate_envelope(envelope_id)
 
-    if first_signer_id:
-        print("[*] Disparando notificação para o Grupo 1...")
-        cs.notify_signer_manual(envelope_id, first_signer_id)
+    if first_group_signer_ids:
+        print(f"[*] Disparando notificação para o Grupo {first_group}...")
+        for signer_id in first_group_signer_ids:
+            cs.notify_signer_manual(envelope_id, signer_id)
 
     print(f"[v] Envelope {envelope_id} ativado! Fluxo sequencial automático iniciado.")
     return envelope_id
+
+
+def _disparar_aviso_comercial_etapa1(
+    deal: dict, numeros_pedidos: dict[str, str] | None
+) -> None:
+    """E-mail informativo ao comercial (não assina); junto com notificação do grupo 1."""
+    try:
+        enviar_aviso_comercial_etapa1(deal, numeros_pedidos)
+    except Exception as exc:
+        deal_id = str(deal.get("id", "")).strip()
+        print(
+            f"[!] Deal {deal_id}: falha ao preparar aviso comercial informativo: {exc}",
+            flush=True,
+        )
 
 
 # ---------- GERAÇÃO DO CONTRATO ----------
@@ -539,6 +558,7 @@ def fill_contract(
     if not percentual_exito:
         percentual_exito = "A definir"
     inscricao_estadual = get_val(deal_data, FIELD_INSCRICAO_ESTADUAL).strip()
+    inscricao_municipal = get_val(deal_data, FIELD_INSCRICAO_MUNICIPAL).strip()
 
     raw_dt_implantacao = get_val(deal_data, FIELD_DATA_IMPLANTACAO)
     dt_implantacao = (
@@ -564,7 +584,12 @@ def fill_contract(
         nome_cliente = parceiro_plune.get("razao_social") or contratante
         nome_fantasia = (parceiro_plune.get("nome_fantasia") or "").strip()
         endereco = parceiro_plune.get("endereco") or get_val(deal_data, FIELD_ENDERECO)
-        cidade = parceiro_plune.get("cidade") or get_val(deal_data, FIELD_CIDADE)
+        cidade = (parceiro_plune.get("cidade") or "").strip()
+        if not cidade:
+            cidade, _ = get_cidade_estado(deal_data)
+        estado = (parceiro_plune.get("uf") or "").strip()
+        if not estado:
+            _, estado = get_cidade_estado(deal_data)
         documento = parceiro_plune.get("documento_formatado") or documento_pipe
         print(f"[*] Contrato com dados do Plune: {nome_cliente} ({documento})")
     else:
@@ -572,7 +597,7 @@ def fill_contract(
         nome_cliente = contratante
         nome_fantasia = contratante
         endereco = get_val(deal_data, FIELD_ENDERECO)
-        cidade = get_val(deal_data, FIELD_CIDADE)
+        cidade, estado = get_cidade_estado(deal_data)
         documento = documento_pipe
 
     if numeros_pedidos is None:
@@ -594,6 +619,7 @@ def fill_contract(
         "nome_fantasia": nome_fantasia,
         "endereco": endereco,
         "cidade": cidade,
+        "estado": estado,
         "documento": documento,
         "sole_web": formatar_quantidade_uc(qtd_sole),
         "sole_consultoria": formatar_quantidade_uc(sole_consultoria),
@@ -602,6 +628,7 @@ def fill_contract(
         "qualidade_energia": formatar_quantidade_uc(qualidade_energia_uc),
         "percentual_exito": percentual_exito,
         "inscricao_estadual": inscricao_estadual,
+        "inscricao_municipal": inscricao_municipal,
         "valor_mensal": formatar_moeda(get_val(deal_data, FIELD_VALOR_MENSAL)),
         "valor_implantacao": formatar_moeda(
             get_val(deal_data, FIELD_VALOR_IMPLANTACAO)
@@ -720,21 +747,35 @@ def _salvar_template_deal_local(
 
 # ---------- NOVO FLUXO: POLLING DA API ----------
 def buscar_deals_ganhos():
-    """Faz a requisição para a API do Pipedrive buscando os deals ganhos."""
+    """Lista deals ganhos no Pipedrive (API v2), com paginação por cursor."""
     url = "https://api.pipedrive.com/api/v2/deals"
-    params = {"status": "won"}
     headers = {"x-api-token": API_TOKEN}
+    deals: list[dict] = []
+    cursor: str | None = None
 
     try:
-        response = requests.get(url, params=params, headers=headers)
-        if response.status_code == 200:
-            return response.json().get("data", [])
-        else:
-            print(f"[!] Erro ao buscar deals: {response.status_code} - {response.text}")
-            return []
+        while True:
+            params: dict = {"status": "won", "limit": 500}
+            if cursor:
+                params["cursor"] = cursor
+            response = requests.get(url, params=params, headers=headers, timeout=60)
+            if response.status_code != 200:
+                print(
+                    f"[!] Erro ao buscar deals: {response.status_code} - {response.text}"
+                )
+                return deals
+            body = response.json()
+            page = body.get("data") or []
+            if isinstance(page, dict):
+                page = [page]
+            deals.extend(page)
+            cursor = (body.get("additional_data") or {}).get("next_cursor")
+            if not cursor:
+                break
+        return deals
     except Exception as e:
         print(f"[!] Falha na conexão com Pipedrive: {e}")
-        return []
+        return deals
 
 
 def _fluxo_hub_pre_aprovacao(
@@ -851,7 +892,7 @@ def processar_deals_pendentes():
 
     eventos_ok, ids_legado = carregar_deals_processados()
     n_won = len(deals)
-    n_sem_won = n_legado = n_dup = n_data = 0
+    n_sem_won = n_legado = n_dup = n_data = n_corte = 0
     algum_processado = False
 
     for deal in deals:
@@ -889,6 +930,7 @@ def processar_deals_pendentes():
             continue
 
         if DATA_INICIO_SCRIPT is not None and won_time_dt < DATA_INICIO_SCRIPT:
+            n_corte += 1
             continue
 
         print(
@@ -1088,6 +1130,7 @@ def processar_deals_pendentes():
                         f"API Clicksign não será chamada.",
                         flush=True,
                     )
+                    _disparar_aviso_comercial_etapa1(deal, numeros_pedidos)
                     salvar_deal_processado(deal_id, won_time_str)
                     algum_processado = True
                     _apos_contrato_dev_sem_envelope_msg()
@@ -1112,6 +1155,7 @@ def processar_deals_pendentes():
                     envelope_id = clicksign_fire_and_forget(
                         doc_path, envelope_name, sequence_dinamica
                     )
+                    _disparar_aviso_comercial_etapa1(deal, numeros_pedidos)
 
                     parceiro_para_envelope = parceiro_criado_plune
                     if registro:
@@ -1159,6 +1203,8 @@ def processar_deals_pendentes():
             partes.append(f"{n_dup} ganho(s) já processados (id|won_time)")
         if n_data:
             partes.append(f"{n_data} won_time inválido")
+        if n_corte:
+            partes.append(f"{n_corte} antes do corte temporal")
         if partes:
             print(
                 f"[*] Ciclo deals: {', '.join(partes)} — nenhum fluxo novo disparado.",

@@ -346,6 +346,16 @@ def _field_resolved(row: dict, field_name: str) -> str:
     return str(item or "")
 
 
+def _normalizar_uf_plune(texto: str) -> str:
+    """UF do Plune (UFPrincipalId): código de 2 letras ou rótulo «RS - Rio Grande do Sul»."""
+    texto = (texto or "").strip()
+    if not texto:
+        return ""
+    if " - " in texto:
+        texto = texto.split(" - ", 1)[0].strip()
+    return texto[:2].upper()
+
+
 _PARCEIRO_BROWSE_FIELDS = [
     "ParceiroId",
     "NumeroContribuinte",
@@ -395,7 +405,10 @@ def _row_para_parceiro(row: dict) -> dict:
         "endereco": _field_value(row, "EnderecoPrincipal").strip(),
         "bairro": _field_value(row, "BairroPrincipal").strip(),
         "cidade": cidade.strip(),
-        "uf": _field_value(row, "UFPrincipalId").strip(),
+        "uf": _normalizar_uf_plune(
+            _field_resolved(row, "UFPrincipalId")
+            or _field_value(row, "UFPrincipalEx")
+        ),
         "cep": _field_value(row, "CEPPrincipal").strip(),
         "email": _field_value(row, "EMail").strip(),
         "contato": _field_value(row, "ContatoNome").strip(),

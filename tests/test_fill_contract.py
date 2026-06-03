@@ -7,9 +7,11 @@ from unittest.mock import MagicMock, patch
 from core.automacao_contrato import fill_contract
 from core.plune_pedido import TIPO_PEDIDO_IMPLANTACAO, TIPO_PEDIDO_RECORRENTE
 from core.pipedrive_fields import (
+    FIELD_CIDADE,
     FIELD_GESTAO_ACL,
     FIELD_INDICADORES_QUALIDADE,
     FIELD_INSCRICAO_ESTADUAL,
+    FIELD_INSCRICAO_MUNICIPAL,
     FIELD_NOME_CLIENTE,
     FIELD_PERCENTUAL_EXITO,
     FIELD_QTD_SOLE,
@@ -57,8 +59,34 @@ def test_sole_consultoria_no_contexto(
 @patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
 @patch("core.automacao_contrato.DocxTemplate")
 @patch("core.automacao_contrato.os.path.exists", return_value=True)
-def test_sem_plune_usa_contratante_para_razao_e_fantasia(
+def test_inscricao_municipal_e_estado_no_contexto(
     mock_exists, mock_docx_cls, mock_parceiro, _enum_label
+):
+    deal = {
+        "id": 746,
+        "title": "Teste",
+        "custom_fields": {
+            FIELD_INSCRICAO_MUNICIPAL: "987654",
+            FIELD_CIDADE: "Pelotas - RS, Brasil",
+        },
+    }
+    mock_parceiro.return_value = None
+    doc = MagicMock()
+    mock_docx_cls.return_value = doc
+
+    fill_contract(deal)
+
+    contexto = doc.render.call_args[0][0]
+    assert contexto["inscricao_municipal"] == "987654"
+    assert contexto["cidade"] == "Pelotas"
+    assert contexto["estado"] == "RS"
+
+
+@patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
+@patch("core.automacao_contrato.DocxTemplate")
+@patch("core.automacao_contrato.os.path.exists", return_value=True)
+def test_sem_plune_usa_contratante_para_razao_e_fantasia(
+    mock_exists, mock_docx_cls, mock_parceiro,
 ):
     deal = {
         "id": 746,
@@ -96,6 +124,58 @@ def test_nome_fantasia_do_plune(mock_exists, mock_docx_cls, mock_parceiro):
     contexto = doc.render.call_args[0][0]
     assert contexto["nome_cliente"] == "RAZAO LTDA"
     assert contexto["nome_fantasia"] == "Marca Fantasia"
+
+
+@patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
+@patch("core.automacao_contrato.DocxTemplate")
+@patch("core.automacao_contrato.os.path.exists", return_value=True)
+def test_cidade_estado_do_plune_no_contexto(mock_exists, mock_docx_cls, mock_parceiro):
+    deal = {"id": 746, "title": "Teste", "custom_fields": {}}
+    mock_parceiro.return_value = {
+        "razao_social": "RAZAO LTDA",
+        "nome_fantasia": "Marca Fantasia",
+        "documento_formatado": "12.345.678/0001-90",
+        "endereco": "Rua A",
+        "cidade": "Curitiba",
+        "uf": "PR",
+    }
+    doc = MagicMock()
+    mock_docx_cls.return_value = doc
+
+    fill_contract(deal)
+
+    contexto = doc.render.call_args[0][0]
+    assert contexto["cidade"] == "Curitiba"
+    assert contexto["estado"] == "PR"
+
+
+@patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")
+@patch("core.automacao_contrato.DocxTemplate")
+@patch("core.automacao_contrato.os.path.exists", return_value=True)
+def test_plune_cidade_preservada_sem_uf_no_pipe(
+    mock_exists, mock_docx_cls, mock_parceiro
+):
+    deal = {
+        "id": 746,
+        "title": "Teste",
+        "custom_fields": {FIELD_CIDADE: "Pelotas - RS, Brasil"},
+    }
+    mock_parceiro.return_value = {
+        "razao_social": "RAZAO LTDA",
+        "nome_fantasia": "",
+        "documento_formatado": "12.345.678/0001-90",
+        "endereco": "Rua A",
+        "cidade": "Pelotas",
+        "uf": "",
+    }
+    doc = MagicMock()
+    mock_docx_cls.return_value = doc
+
+    fill_contract(deal)
+
+    contexto = doc.render.call_args[0][0]
+    assert contexto["cidade"] == "Pelotas"
+    assert contexto["estado"] == "RS"
 
 
 @patch("core.automacao_contrato.buscar_parceiro_plune_por_documento")

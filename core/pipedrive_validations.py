@@ -8,10 +8,12 @@ from .pipedrive_fields import (
     CAMPOS_CONTRATO_OBRIGATORIOS,
     CAMPOS_CONTRATO_OPCIONAIS,
     CAMPOS_SERVICO_UC,
+    FIELD_DATA_PAGAMENTO_IMPLANTACAO,
     FIELD_DOCUMENTO,
     FIELD_FILIAL,
     FIELD_REGIONAL,
     FIELD_SUBCENTRO_NIVEL_3,
+    FIELD_VALOR_IMPLANTACAO,
     get_enum_label,
     get_filial_chaves,
     get_filial_label,
@@ -21,6 +23,7 @@ from .pipedrive_fields import (
     settings_por_branch,
 )
 from .hub_pedido import erros_validacao_observacoes_hub
+from .pipedrive_files import listar_arquivos_deal, tem_arquivo_proposta_comercial
 from .plune_catalog import resolver_subcentro, sincronizar_subcentros_de_pedidos
 
 
@@ -52,6 +55,11 @@ def _decimal_pipe(valor) -> float | None:
 def _valor_numero_maior_que_um(valor) -> bool:
     numero = _decimal_pipe(valor)
     return numero is not None and numero > 1
+
+
+def _implantacao_exige_data_pagamento(deal: dict) -> bool:
+    """Mesmo critério do pedido Plune implantação: só com valor > 1."""
+    return _valor_numero_maior_que_um(get_val(deal, FIELD_VALOR_IMPLANTACAO))
 
 
 def _documento_valido(valor: str) -> bool:
@@ -132,6 +140,20 @@ def _validar_campo_contrato(deal: dict, label: str, field_code: str, tipo: str) 
             )
         return None
 
+    if tipo == "money_implantacao":
+        if not _campo_presente_no_deal(deal, field_code):
+            return (
+                f"Campo obrigatório ausente: {label}. "
+                f"Informe o valor (use 0 se não houver implantação)."
+            )
+        if _decimal_pipe(get_val(deal, field_code)) is None:
+            return (
+                f"Campo obrigatório inválido: {label}. "
+                f"Informe um valor numérico (0 se não houver implantação). "
+                f"Valor recebido: {get_val(deal, field_code)!r}."
+            )
+        return None
+
     if tipo == "date":
         valor = get_val(deal, field_code).strip()
         if not valor:
@@ -180,6 +202,11 @@ def validar_deal_para_automacao(deal: dict) -> None:
 
     for label, field_code, tipo in CAMPOS_CONTRATO_OBRIGATORIOS:
         if field_code == FIELD_FILIAL or field_code in CAMPOS_CONTRATO_OPCIONAIS:
+            continue
+        if (
+            field_code == FIELD_DATA_PAGAMENTO_IMPLANTACAO
+            and not _implantacao_exige_data_pagamento(deal)
+        ):
             continue
         msg = _validar_campo_contrato(deal, label, field_code, tipo)
         if msg:
@@ -238,6 +265,18 @@ def validar_deal_para_automacao(deal: dict) -> None:
 
     erros.extend(erros_validacao_observacoes_hub(deal))
 
+    try:
+        arquivos = listar_arquivos_deal(deal_id)
+        if not tem_arquivo_proposta_comercial(arquivos):
+            erros.append(
+                "Anexo obrigatório ausente: Proposta Comercial. "
+                "Anexe um arquivo cujo nome contenha «Proposta Comercial» no deal."
+            )
+    except RuntimeError as exc:
+        erros.append(
+            f"Não foi possível verificar anexos do deal (Proposta Comercial): {exc}"
+        )
+
     if erros:
         raise DealValidationError(deal_id, erros)
 
@@ -284,8 +323,8 @@ def reabrir_deal_com_erros(deal_id: str, erros: list[str]) -> None:
     nota = (
         "<p><strong>Automação Gebras:</strong> o card foi reaberto porque há "
         "campos obrigatórios inválidos ou ausentes na seção <strong>Contrato</strong> "
-        "(exceto Código da Instalação, Código Cliente, Datas/Valor de Implantação "
-        "e Observações).</p>"
+        "(exceto Observações), "
+        "ou falta o anexo <strong>Proposta Comercial</strong>.</p>"
         f"<ul>{itens}</ul>"
         "<p>Corrija os campos e marque o card como ganho novamente.</p>"
     )

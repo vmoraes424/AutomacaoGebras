@@ -12,6 +12,7 @@ from core.pipedrive_files import (
     baixar_pdf_proposta_deal,
     escolher_pdf_proposta,
     listar_arquivos_deal,
+    tem_arquivo_proposta_comercial,
 )
 
 
@@ -27,6 +28,13 @@ class TestEhPdf:
 
 
 class TestEscolherPdfProposta:
+    def test_prioriza_nome_proposta_comercial(self):
+        arquivos = [
+            {"id": 1, "name": "outro proposta.pdf", "file_type": "pdf"},
+            {"id": 2, "name": "Apresentacao Proposta Comercial.pdf", "file_type": "pdf"},
+        ]
+        assert escolher_pdf_proposta(arquivos)["id"] == 2
+
     def test_prioriza_nome_proposta(self):
         arquivos = [
             {"id": 1, "name": "outro.pdf", "file_type": "pdf"},
@@ -44,6 +52,36 @@ class TestEscolherPdfProposta:
     def test_vazio(self):
         assert escolher_pdf_proposta([]) is None
         assert escolher_pdf_proposta([{"name": "x.docx"}]) is None
+
+
+class TestTemArquivoPropostaComercial:
+    @pytest.mark.parametrize(
+        "nome",
+        [
+            "Proposta Comercial.pdf",
+            "2024 - Proposta Comercial Cliente X.docx",
+            "proposta comercial assinada.PDF",
+        ],
+    )
+    def test_nomes_validos(self, nome: str):
+        arquivos = [{"name": nome}]
+        assert tem_arquivo_proposta_comercial(arquivos) is True
+
+    @pytest.mark.parametrize(
+        "nome",
+        [
+            "contrato.pdf",
+            "Proposta.pdf",
+            "Comercial.pdf",
+            "proposta-comercial.pdf",
+        ],
+    )
+    def test_nomes_invalidos(self, nome: str):
+        arquivos = [{"name": nome}]
+        assert tem_arquivo_proposta_comercial(arquivos) is False
+
+    def test_lista_vazia(self):
+        assert tem_arquivo_proposta_comercial([]) is False
 
 
 class TestListarArquivosDeal:
