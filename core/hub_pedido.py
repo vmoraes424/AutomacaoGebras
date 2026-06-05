@@ -24,6 +24,7 @@ from .config import (
     MYSQL_PASSWORD,
     MYSQL_PORT,
     MYSQL_USER,
+    PULAR_HUB,
 )
 from .database import (
     buscar_por_deal_id,
@@ -33,14 +34,14 @@ from .database import (
 from .pipedrive_fields import (
     CAMPOS_CONTRATO_OPCIONAIS,
     FIELD_DATA_PRIMEIRA_COBRANCA,
-    FIELD_NUMERO_CONTRATO_P1,
-    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_CODIGO_CLIENTE_INSTALACAO,
     FIELD_OBSERVACOES_DETALHES,
     FIELD_PERCENTUAL_EXITO,
     buscar_deal_por_id,
     get_enum_label,
     get_numero_contrato,
     get_val,
+    parse_codigo_cliente_instalacao,
 )
 from .plune_pedido import TIPO_PEDIDO_RECORRENTE, obter_numeros_pedidos_plune_deal
 
@@ -302,8 +303,9 @@ def validar_observacoes_hub_obrigatorias(
     """
     Valida e interpreta Observações (Detalhes). Sem formato correto → HubPedidoError.
 
-    «UC =» usa instalacao.IDENTIFICACAO (não CODIGO). Cada UC resolvida deve bater com P1.
-    Blocos separados por «;»; serviços por «+»; valor BR após «=» final (ex.: 1.500,92).
+    Instalações (CODIGO) vêm só de Código Cliente/Código da Instalação (ex.: 352/1234,3456).
+    Observações definem serviços e valor por bloco «UC =»; a quantidade de blocos deve
+    coincidir com a quantidade de instalações no campo combinado.
     """
     deal_id = str(deal_id).strip()
     texto = (obs_pipe or "").strip()
@@ -320,50 +322,42 @@ def validar_observacoes_hub_obrigatorias(
         )
 
     segmentos = _segmentos_observacoes_hub(texto)
-    linhas = _resolver_linhas_observacoes_hub(texto, codigo_cliente)
-    if not linhas:
+    blocos = _parse_blocos_observacoes_hub(texto)
+    if not blocos:
         raise HubPedidoError(
             _mensagem_formato_observacoes_hub(
                 deal_id,
                 "nenhum bloco válido (use «-», «+», «=» e valor tipo 1.500,92)",
             )
         )
-    if len(linhas) != len(segmentos):
+    if len(blocos) != len(segmentos):
         raise HubPedidoError(
             f"Deal {deal_id}: há {len(segmentos)} bloco(s) separados por «;», mas apenas "
-            f"{len(linhas)} no formato completo «{FORMATO_OBSERVACOES_HUB}». "
+            f"{len(blocos)} no formato completo «{FORMATO_OBSERVACOES_HUB}». "
             "Revise «+», o valor (ex.: 1.500,92) e o separador «;» entre UCs."
         )
-
-    obs_por_uc = {linha.codigo_instalacao: linha for linha in linhas}
-    p1_set = set(codigos_instalacao)
-    obs_set = set(obs_por_uc)
-    if obs_set != p1_set:
+    if len(blocos) != len(codigos_instalacao):
         raise HubPedidoError(
-            f"Deal {deal_id}: cada código em Código da Instalação (P1) {sorted(p1_set)} "
-            f"precisa de um bloco «UC = <IDENTIFICACAO>» em Observações que aponte para essa "
-            f"instalação; CODIGO resolvido no HUB: {sorted(obs_set)}."
+            f"Deal {deal_id}: Código Cliente/Código da Instalação tem "
+            f"{len(codigos_instalacao)} instalação(ões) {codigos_instalacao}, "
+            f"mas Observações (Detalhes) tem {len(blocos)} bloco(s) «UC =». "
+            "Informe um bloco por instalação, na mesma ordem."
         )
+
+    linhas = _resolver_linhas_observacoes_hub(texto, codigos_instalacao)
     return linhas
 
 
 def erros_validacao_observacoes_hub(deal: dict) -> list[str]:
     """Mensagens para DealValidationError (validação no ganho do deal)."""
     deal_id = str(deal.get("id", ""))
-    p1_raw = get_val(deal, FIELD_NUMERO_CONTRATO_P1).strip()
-    p2_raw = get_val(deal, FIELD_NUMERO_CONTRATO_P2).strip()
-    if not p1_raw:
+    codigo_cliente_raw = get_val(deal, FIELD_CODIGO_CLIENTE_INSTALACAO).strip()
+    if not codigo_cliente_raw:
         return []
     try:
-        codigos_p1 = _parse_codigos_instalacao_p1(p1_raw)
+        codigos_p1, codigo_cliente = _p1_p2_do_deal(deal)
     except HubPedidoError as exc:
         return [str(exc)]
-    if not p2_raw:
-        return []
-    try:
-        codigo_cliente = int(p2_raw.split(",")[0].strip())
-    except ValueError:
-        return ["Código Cliente (P2) deve ser numérico para validar Observações do HUB."]
     obs_pipe = get_val(deal, FIELD_OBSERVACOES_DETALHES).strip()
     if not obs_pipe and FIELD_OBSERVACOES_DETALHES in CAMPOS_CONTRATO_OPCIONAIS:
         return []
@@ -411,7 +405,7 @@ def _parse_blocos_observacoes_hub(texto: str) -> list[tuple[str, tuple[int, ...]
 
 
 def _resolver_codigo_instalacao_hub(identificacao: str, codigo_cliente: int) -> int:
-    """Resolve instalacao.CODIGO a partir de IDENTIFICACAO + COD_CLIENTE (P2)."""
+    """Resolve instalacao.CODIGO a partir de IDENTIFICACAO + COD_CLIENTE (Código Cliente/Instalação)."""
     identificacao = identificacao.strip()
     if not identificacao:
         raise HubPedidoError("IDENTIFICACAO da UC vazia em Observações (Detalhes).")
@@ -430,17 +424,19 @@ def _resolver_codigo_instalacao_hub(identificacao: str, codigo_cliente: int) -> 
     if not row:
         raise HubPedidoError(
             f"UC {identificacao!r} não encontrada em instalacao.IDENTIFICACAO "
-            f"para cliente {codigo_cliente} (confira Observações e Código Cliente P2)."
+            f"para cliente {codigo_cliente} (confira Observações e "
+            "Código Cliente/Código da Instalação)."
         )
     return int(row[0])
 
 
 def _resolver_linhas_observacoes_hub(
-    texto: str, codigo_cliente: int
+    texto: str, codigos_instalacao: list[int]
 ) -> list[InstalacaoObsHub]:
+    """Associa cada bloco UC (serviços/valor) ao CODIGO do campo cliente/instalação."""
     linhas: list[InstalacaoObsHub] = []
-    for identificacao, servicos, valor in _parse_blocos_observacoes_hub(texto):
-        codigo = _resolver_codigo_instalacao_hub(identificacao, codigo_cliente)
+    blocos = _parse_blocos_observacoes_hub(texto)
+    for (identificacao, servicos, valor), codigo in zip(blocos, codigos_instalacao):
         linhas.append(
             InstalacaoObsHub(
                 identificacao=identificacao,
@@ -491,13 +487,35 @@ def _perc_economia_do_deal(deal: dict) -> tuple[bool, Decimal]:
     return True, valor.quantize(Decimal("0.01"))
 
 
-def _parse_codigos_instalacao_p1(p1_raw: str) -> list[int]:
+def _p1_p2_do_deal(deal: dict) -> tuple[list[int], int]:
+    """P2 e instalações (P1) somente do campo «codigo_cliente/inst1,inst2»."""
+    codigo_cliente_raw = get_val(deal, FIELD_CODIGO_CLIENTE_INSTALACAO).strip()
+    if not codigo_cliente_raw:
+        raise HubPedidoError(
+            "Código Cliente/Código da Instalação obrigatório no Pipedrive."
+        )
+    try:
+        codigo_cliente, instalacoes_campo = parse_codigo_cliente_instalacao(
+            codigo_cliente_raw
+        )
+    except ValueError as exc:
+        raise HubPedidoError(str(exc)) from exc
+
+    if not instalacoes_campo:
+        raise HubPedidoError(
+            "Informe as instalações após «/» em Código Cliente/Código da Instalação "
+            "(ex.: 352/1234,3456). O campo Notas é independente e não define instalações HUB."
+        )
+    return instalacoes_campo, codigo_cliente
+
+
+def _parse_codigos_notas(notas_raw: str) -> list[int]:
     """
-    Código(s) da Instalação (P1): um ou vários separados por vírgula, ; ou espaço.
+    Campo Notas: um ou vários códigos de instalação separados por vírgula, ; ou espaço.
     Ex.: ``00665,01942`` → [665, 1942].
     """
     codigos: list[int] = []
-    for parte in re.split(r"[,;\s]+", p1_raw.strip()):
+    for parte in re.split(r"[,;\s]+", notas_raw.strip()):
         texto = parte.strip()
         if not texto:
             continue
@@ -505,10 +523,10 @@ def _parse_codigos_instalacao_p1(p1_raw: str) -> list[int]:
             codigos.append(int(texto))
         except ValueError as exc:
             raise HubPedidoError(
-                f"Código da Instalação inválido no Pipedrive: {texto!r}"
+                f"Notas: código de instalação inválido no Pipedrive: {texto!r}"
             ) from exc
     if not codigos:
-        raise HubPedidoError("Código da Instalação (P1) vazio no Pipedrive.")
+        raise HubPedidoError("Notas vazio no Pipedrive.")
     vistos: set[int] = set()
     unicos: list[int] = []
     for codigo in codigos:
@@ -519,7 +537,7 @@ def _parse_codigos_instalacao_p1(p1_raw: str) -> list[int]:
 
 
 def _validar_instalacao_hub(codigo_instalacao: int, codigo_cliente: int) -> None:
-    """Confere se cada CODIGO do P1 existe para o cliente (P2)."""
+    """Confere se cada CODIGO do campo cliente/instalação existe no HUB para o cliente."""
     with hub_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -535,7 +553,7 @@ def _validar_instalacao_hub(codigo_instalacao: int, codigo_cliente: int) -> None
     if not ok:
         raise HubPedidoError(
             f"Instalação HUB {codigo_instalacao} não encontrada para cliente {codigo_cliente} "
-            "(confira Código da Instalação e Código Cliente no Pipedrive)."
+            "(confira Código Cliente/Código da Instalação no Pipedrive)."
         )
 
 
@@ -628,19 +646,10 @@ def _skip_parceiro_novo_hub(
 
 
 def _montar_dados_pedido_hub_deal(deal_id: str, deal: dict) -> dict[str, Any]:
-    p1_raw = get_val(deal, FIELD_NUMERO_CONTRATO_P1).strip()
-    p2_raw = get_val(deal, FIELD_NUMERO_CONTRATO_P2).strip()
-    if not p1_raw or not p2_raw:
-        raise HubPedidoError(
-            f"Deal {deal_id}: Código da Instalação (P1) e Código Cliente (P2) obrigatórios no Pipedrive."
-        )
-    codigos_instalacao = _parse_codigos_instalacao_p1(p1_raw)
     try:
-        codigo_cliente = int(p2_raw.split(",")[0].strip())
-    except ValueError as exc:
-        raise HubPedidoError(
-            f"Deal {deal_id}: Código Cliente (P2) deve ser numérico."
-        ) from exc
+        codigos_instalacao, codigo_cliente = _p1_p2_do_deal(deal)
+    except HubPedidoError as exc:
+        raise HubPedidoError(f"Deal {deal_id}: {exc}") from exc
 
     obs_pipe = get_val(deal, FIELD_OBSERVACOES_DETALHES).strip()
     linhas_obs = validar_observacoes_hub_obrigatorias(
@@ -773,6 +782,12 @@ def criar_pedido_hub(
     ignorar_ja_criado: recria quando o estado local indica pedido mas a linha sumiu no HUB.
     """
     deal_id = str(deal_id).strip()
+    if PULAR_HUB:
+        return {
+            "status": "skipped",
+            "deal_id": deal_id,
+            "reason": "hub_criacao_desabilitada",
+        }
     skip, registro = _skip_parceiro_novo_hub(
         deal_id, parceiro_plune_criado=parceiro_plune_criado
     )
@@ -1030,6 +1045,11 @@ def log_resultado_hub(deal_id: str, result: dict) -> None:
         if reason == "hub_aguardando_aprovacao_plune":
             print(
                 f"[*] HUB: aguardando aprovação Plune para criar pedido (deal {deal_id}).",
+                flush=True,
+            )
+        elif reason == "hub_criacao_desabilitada":
+            print(
+                f"[*] HUB: criação desabilitada (PULAR_HUB) — deal {deal_id}.",
                 flush=True,
             )
         else:

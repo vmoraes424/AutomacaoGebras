@@ -1122,8 +1122,8 @@ Definidos em `core/pipedrive_fields.py`.
 
 | Uso | Hash |
 |---|---|
-| Número do contrato parte 1 | `14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b` |
-| Número do contrato parte 2 | `41a3157128d51e2fc803eeec4b242efafcb55b4e` |
+| Notas (códigos instalação / nº contrato) | `14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b` |
+| Código Cliente/Código da Instalação | `41a3157128d51e2fc803eeec4b242efafcb55b4e` |
 | Nome/razão social do cliente | `28d491e0263008b437e28fc55bbad8302c4646c8` |
 | Endereço | `81566ac6e038bb0ba3adfa122c798b3e497b7538` |
 | Cidade | `2bf3850e0a6dc7232f5f44197e79ffcc5642c1c5` |
@@ -1135,18 +1135,21 @@ Definidos em `core/pipedrive_fields.py`.
 | Data primeira cobrança | `f5f69ea52e5f65b37c9672fdb4dcfb3b6a4cdbb2` |
 | Indicadores de qualidade | `ffb2d5aec9acdee5a242ca19683bbf4caa24cd53` |
 | Qualidade de energia | `c0a23912d889e00f51ed5bd08a55856a7e5dc930` |
-| Contato gestor | `ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b` |
 | Contato financeiro | `722da69afe31c1f8fa4f5457a223e2a952ae0978` |
 | Contato contratante | `3002b2df87f0577585ebaec394fd09a38ca8778f` |
+| Regional (SubCentroCusto2Id) | `14855b5973f28e97dafd4e2abccc539d7461dc24` |
+| Consultor (SubCentroCusto3Id) | `60ffe8e9c2aa51f717865559e86e6044bfb335e6` |
 
 ### Signatários
 
 | Cargo/nome usado | Hash |
 |---|---|
-| Coordenador Principal | `92359b129485b08fd024b8c28ef022e7635419a3` |
+| Consultor GEBRAS | `3bacd163054a20c843e79bc525bebc1285773b17` |
+| Coordenador GEBRAS | `3a5c1d1dc1b5f023f57c65b9bf725c27d754d31b` |
 | Contato Principal | `a23ea2d277d95f8fa1c3d02d1db36a032be7f4a6` |
-| Gestor Gebras | `ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b` |
-| Diretor Principal | `35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2` |
+| Diretor GEBRAS | `a2eba4ca348f3597d570d84c356aa66e81d762cd` |
+
+Hashes legados removidos do Pipedrive (jun/2026): E-mail Gestor GEBRAS (`ecb0e3a2…`), E-mail Coordenador (`92359b12…`), E-mail Diretor (`35cc64cc…`). O código ainda lê esses valores em deals antigos.
 
 ### Recomendações para manter campos
 

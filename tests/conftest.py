@@ -17,6 +17,8 @@ os.environ.setdefault("CLICKSIGN_ACCESS_TOKEN", "pytest-clicksign-token")
 os.environ.setdefault("CLICKSIGN_BASE_URL", "https://sandbox.clicksign.com/api/v3")
 os.environ.setdefault("PLUNE_BASE_URL", "https://plune.test.example")
 os.environ.setdefault("PLUNE_AUTH_TOKEN", "pytest-plune-token")
+# .env local pode ter PULAR_HUB=true; testes de criação HUB precisam dela false
+os.environ["PULAR_HUB"] = "false"
 
 # config.PLUNE_BRANCH_ID consulta MySQL no import de plune_pedido — mock antes de qualquer import core.*
 _FAKE_FILIAL = {

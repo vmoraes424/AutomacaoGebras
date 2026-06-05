@@ -17,6 +17,12 @@ OLD_SUBCENTRO = (
     "3b5fc4072a4bff3e5e24dce974d20e15c6ebaed6",
     "4f6e152a7d4f89dbd6664ef97980531394721599",
 )
+# Removidos do Pipedrive (jun/2026); mantidos no código para deals antigos
+LEGACY_REMOVED = frozenset({
+    "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b",
+    "92359b129485b08fd024b8c28ef022e7635419a3",
+    "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2",
+})
 
 
 def main() -> int:
@@ -24,8 +30,8 @@ def main() -> int:
     for name, val in vars(pf).items():
         if name.startswith("FIELD_") and isinstance(val, str) and len(val) == 40:
             consts[name] = val
-    for nome, chave in pf.SIGNER_FIELDS:
-        consts[f"SIGNER:{nome}"] = chave
+    for papel, _nome_cs, chave, *_ in pf.SIGNER_FIELDS:
+        consts[f"SIGNER:{papel}"] = chave
 
     fields = fetch_deal_fields(load_token())
     by_code = {str(f.get("field_code")): f for f in fields}
@@ -36,8 +42,11 @@ def main() -> int:
     for nome, hashv in sorted(consts.items()):
         f = by_code.get(hashv)
         if not f:
-            missing += 1
-            print(f"ERRO  {nome:36} hash ausente na API")
+            if hashv in LEGACY_REMOVED:
+                print(f"AVISO {nome:36} hash removido da API (legado)")
+            else:
+                missing += 1
+                print(f"ERRO  {nome:36} hash ausente na API")
         else:
             print(
                 f"OK    {nome:36} -> {f.get('field_name')!r} "
@@ -80,10 +89,15 @@ def main() -> int:
         f"  FIELD_SUBCENTRO_NIVEL_3 -> API: {f3.get('field_name')!r} "
         f"({f3.get('field_type')})"
     )
-    if f2.get("field_name") and "Regional" not in str(f2.get("field_name")):
+    if f2.get("field_name") and str(f2.get("field_name")) != "Regional":
         print(
-            "  AVISO: constante FIELD_REGIONAL nao reflete nome atual "
-            "(Sub Centro Nivel 2)"
+            f"  AVISO: FIELD_REGIONAL -> API: {f2.get('field_name')!r} "
+            "(esperado 'Regional')"
+        )
+    if f3.get("field_name") and str(f3.get("field_name")) != "Consultor":
+        print(
+            f"  AVISO: FIELD_SUBCENTRO_NIVEL_3 -> API: {f3.get('field_name')!r} "
+            "(esperado 'Consultor')"
         )
 
     iq = by_code.get(pf.FIELD_INDICADORES_QUALIDADE, {})

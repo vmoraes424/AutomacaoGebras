@@ -26,6 +26,7 @@ from core.plune_pedido import (
     _criar_parceiro,
     _escolher_parceiro_por_documento,
     _montar_params_parceiro,
+    _normalizar_uf_plune,
     _resolver_ou_criar_parceiro,
     _tipo_parceiro_flags,
 )
@@ -69,6 +70,29 @@ def _parceiro_plune_row(
         "email": "",
         "contato": "",
     }
+
+
+class TestNormalizarUfPlune:
+    @pytest.mark.parametrize(
+        "entrada,esperado",
+        [
+            ("RS", "RS"),
+            ("sp", "SP"),
+            ("RS - Rio Grande do Sul", "RS"),
+            ("SP - São Paulo", "SP"),
+            ("Rio Grande do Sul", "RS"),
+            ("Santa Catarina", "SC"),
+            ("São Paulo", "SP"),
+            ("Minas Gerais", "MG"),
+            ("Rio de Janeiro", "RJ"),
+            ("Mato Grosso do Sul", "MS"),
+            ("Distrito Federal", "DF"),
+            ("", ""),
+            ("Texto inválido", ""),
+        ],
+    )
+    def test_converte_formatos_comuns(self, entrada, esperado):
+        assert _normalizar_uf_plune(entrada) == esperado
 
 
 class TestTipoParceiroFlags:
@@ -286,3 +310,70 @@ class TestBuscarParceirosPorDocumento:
 
         assert parceiros[0]["cidade"] == "Pelotas"
         assert parceiros[0]["uf"] == "RS"
+
+    @patch("core.plune_pedido._plune_get")
+    def test_browse_uf_value_e_resolved_nome_completo(self, mock_plune):
+        """Select/Browse pode trazer value=RS e resolved=Rio Grande do Sul — usar o código."""
+        mock_plune.return_value = {
+            "data": {
+                "row": [
+                    {
+                        "ParceiroId": {"value": "12057"},
+                        "NumeroContribuinte": {"value": "52398605000186"},
+                        "NomRazaoSocial": {"value": "BIView"},
+                        "NomFantasia": {"value": ""},
+                        "ECliente": {"value": "0"},
+                        "EFornecedor": {"value": "1"},
+                        "EnderecoPrincipal": {"value": ""},
+                        "BairroPrincipal": {"value": ""},
+                        "CidadePrincipalId": {
+                            "value": "7965",
+                            "resolved": "Pelotas",
+                        },
+                        "UFPrincipalId": {
+                            "value": "RS",
+                            "resolved": "Rio Grande do Sul",
+                        },
+                        "CEPPrincipal": {"value": ""},
+                        "ContatoNome": {"value": ""},
+                        "EMail": {"value": ""},
+                    }
+                ]
+            }
+        }
+
+        parceiros = _buscar_parceiros_por_documento("52398605000186")
+
+        assert parceiros[0]["uf"] == "RS"
+
+    @patch("core.plune_pedido._plune_get")
+    def test_browse_uf_apenas_nome_completo_em_resolved(self, mock_plune):
+        """Sem value — só nome do estado no resolved (ex.: Santa Catarina → SC)."""
+        mock_plune.return_value = {
+            "data": {
+                "row": [
+                    {
+                        "ParceiroId": {"value": "9001"},
+                        "NumeroContribuinte": {"value": "12345678000199"},
+                        "NomRazaoSocial": {"value": "Cliente SC"},
+                        "NomFantasia": {"value": ""},
+                        "ECliente": {"value": "1"},
+                        "EFornecedor": {"value": "0"},
+                        "EnderecoPrincipal": {"value": ""},
+                        "BairroPrincipal": {"value": ""},
+                        "CidadePrincipalEx": {"value": "Florianópolis"},
+                        "UFPrincipalId": {
+                            "value": "",
+                            "resolved": "Santa Catarina",
+                        },
+                        "CEPPrincipal": {"value": ""},
+                        "ContatoNome": {"value": ""},
+                        "EMail": {"value": ""},
+                    }
+                ]
+            }
+        }
+
+        parceiros = _buscar_parceiros_por_documento("12345678000199")
+
+        assert parceiros[0]["uf"] == "SC"

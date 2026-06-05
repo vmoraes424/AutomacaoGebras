@@ -27,8 +27,8 @@ from core.plune_pedido import (
 from core.pedido_anexos import CacheAnexosDeal
 from core.pipedrive_fields import (
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
-    FIELD_NUMERO_CONTRATO_P1,
-    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_CODIGO_CLIENTE_INSTALACAO,
+    FIELD_NOTAS,
     FIELD_OBSERVACOES_DETALHES,
     FIELD_PERCENTUAL_EXITO,
     FIELD_VALOR_IMPLANTACAO,
@@ -45,8 +45,8 @@ def _deal_comissao():
         "id": 746,
         "title": "Teste",
         "custom_fields": {
-            FIELD_NUMERO_CONTRATO_P1: "123",
-            FIELD_NUMERO_CONTRATO_P2: "456",
+            FIELD_NOTAS: "123",
+            FIELD_CODIGO_CLIENTE_INSTALACAO: "456",
             FIELD_VALOR_IMPLANTACAO: "7000",
             FIELD_VALOR_MENSAL: "789",
             FIELD_GESTAO_USINA_FOTOVOLTAICA: 7,
@@ -68,8 +68,8 @@ class TestDescricaoPedido:
         deal = {
             "id": 746,
             "custom_fields": {
-                FIELD_NUMERO_CONTRATO_P1: "123",
-                FIELD_NUMERO_CONTRATO_P2: "456",
+                FIELD_NOTAS: "123",
+                FIELD_CODIGO_CLIENTE_INSTALACAO: "456",
             },
         }
         assert _descricao_pedido_plune(deal, TIPO_PEDIDO_IMPLANTACAO) == get_numero_contrato(
@@ -80,8 +80,8 @@ class TestDescricaoPedido:
         deal = {
             "id": 746,
             "custom_fields": {
-                FIELD_NUMERO_CONTRATO_P1: "123",
-                FIELD_NUMERO_CONTRATO_P2: "456",
+                FIELD_NOTAS: "123",
+                FIELD_CODIGO_CLIENTE_INSTALACAO: "456",
             },
         }
         assert _descricao_pedido_plune(deal, TIPO_PEDIDO_RECORRENTE) == get_numero_contrato(
@@ -138,21 +138,34 @@ class TestMontarQueryInsertPedido:
         assert q_rec["Venda.Pedido.Aprovado"] == "0"
 
 class TestObservacoesPedido:
-    def test_observacoes_detalhes_pipe_vai_para_observacao(self):
+    def test_notas_e_observacoes_detalhes_vao_para_observacao_plune(self):
         deal = {
             "id": 746,
             "title": "Biview",
             "custom_fields": {
                 FIELD_VALOR_MENSAL: "789",
                 FIELD_VALOR_IMPLANTACAO: "7000",
-                FIELD_NUMERO_CONTRATO_P1: "123",
-                FIELD_NUMERO_CONTRATO_P2: "456",
+                FIELD_NOTAS: "Notas do contrato no Pipe",
+                FIELD_CODIGO_CLIENTE_INSTALACAO: "456",
                 FIELD_GESTAO_USINA_FOTOVOLTAICA: 7,
                 FIELD_OBSERVACOES_DETALHES: "Texto livre do Pipedrive",
             },
         }
         out = _montar_observacoes_pedido(deal, TIPO_PEDIDO_RECORRENTE)
-        assert out["Observacao"].startswith("Texto livre do Pipedrive")
+        assert out["Observacao"].startswith("Notas do contrato no Pipe")
+        assert "Texto livre do Pipedrive" in out["Observacao"]
+
+    def test_notas_pipe_vai_para_observacao_plune(self):
+        deal = {
+            "id": 746,
+            "title": "Biview",
+            "custom_fields": {
+                FIELD_VALOR_MENSAL: "789",
+                FIELD_NOTAS: "00665,01942",
+            },
+        }
+        out = _montar_observacoes_pedido(deal, TIPO_PEDIDO_RECORRENTE)
+        assert out["Observacao"].startswith("00665,01942")
 
     @patch("core.plune_pedido.get_enum_label")
     def test_exito_gebras_vem_do_pipedrive(self, mock_enum):

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.pipedrive_fields import (
-    FIELD_NUMERO_CONTRATO_P1,
-    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_CODIGO_CLIENTE_INSTALACAO,
+    FIELD_CONTATO_GESTOR,
+    FIELD_EMAIL_CONSULTOR_GEBRAS,
+    FIELD_NOTAS,
     formatar_data_ptbr,
     formatar_decimal_plune,
+    get_contato_gestor_contrato,
     get_numero_contrato,
     get_cidade_estado,
     normalizar_cep,
@@ -63,15 +68,14 @@ class TestNumeroContrato:
         assert sufixo_ano_contrato_gebras(ano=2027) == "n1r0a27"
         assert sufixo_ano_contrato_gebras(ano=2030) == "n1r0a30"
 
-    def test_montagem_com_p1_p2(self):
+    def test_montagem_com_primeira_instalacao_e_cliente(self):
         deal = {
             "custom_fields": {
-                FIELD_NUMERO_CONTRATO_P1: "00665,01942",
-                FIELD_NUMERO_CONTRATO_P2: "352",
+                FIELD_CODIGO_CLIENTE_INSTALACAO: "352/00665,01942",
             }
         }
         assert get_numero_contrato(deal) == "CGRc00665i352n1r0a26"
-        deal["custom_fields"][FIELD_NUMERO_CONTRATO_P1] = "665; 1942"
+        deal["custom_fields"][FIELD_CODIGO_CLIENTE_INSTALACAO] = "352/665; 1942"
         assert get_numero_contrato(deal) == "CGRc665i352n1r0a26"
 
     def test_p1_p2_vazios_usam_deal_id(self):
@@ -82,10 +86,42 @@ class TestNumeroContrato:
         deal = {
             "id": 746,
             "custom_fields": {
-                FIELD_NUMERO_CONTRATO_P2: "352",
+                FIELD_CODIGO_CLIENTE_INSTALACAO: "352",
             },
         }
         assert get_numero_contrato(deal) == "CGRc746i352n1r0a26"
+
+    def test_ignora_notas_usa_primeira_instalacao_do_campo(self):
+        deal = {
+            "custom_fields": {
+                FIELD_NOTAS: "00665,01942",
+                FIELD_CODIGO_CLIENTE_INSTALACAO: "352/1234,3456",
+            }
+        }
+        assert get_numero_contrato(deal) == "CGRc1234i352n1r0a26"
+
+
+class TestParseCodigoClienteInstalacao:
+    def test_somente_cliente(self):
+        from core.pipedrive_fields import parse_codigo_cliente_instalacao
+
+        assert parse_codigo_cliente_instalacao("352") == (352, [])
+
+    def test_cliente_com_uma_instalacao(self):
+        from core.pipedrive_fields import parse_codigo_cliente_instalacao
+
+        assert parse_codigo_cliente_instalacao("352/1234") == (352, [1234])
+
+    def test_cliente_com_varias_instalacoes(self):
+        from core.pipedrive_fields import parse_codigo_cliente_instalacao
+
+        assert parse_codigo_cliente_instalacao("352/665,1942") == (352, [665, 1942])
+
+    def test_formato_invalido(self):
+        from core.pipedrive_fields import parse_codigo_cliente_instalacao
+
+        with pytest.raises(ValueError, match="instalação"):
+            parse_codigo_cliente_instalacao("352/abc")
 
 
 class TestSplitCidadeEstado:
@@ -108,3 +144,18 @@ class TestSplitCidadeEstado:
             }
         }
         assert get_cidade_estado(deal) == ("Pelotas", "RS")
+
+
+class TestContatoGestorContrato:
+    def test_usa_email_consultor_gebras(self):
+        deal = {
+            "custom_fields": {
+                FIELD_EMAIL_CONSULTOR_GEBRAS: "consultor@gebras.com",
+                FIELD_CONTATO_GESTOR: "legado@gebras.com",
+            }
+        }
+        assert get_contato_gestor_contrato(deal) == "consultor@gebras.com"
+
+    def test_fallback_campo_legado(self):
+        deal = {"custom_fields": {FIELD_CONTATO_GESTOR: "legado@gebras.com"}}
+        assert get_contato_gestor_contrato(deal) == "legado@gebras.com"

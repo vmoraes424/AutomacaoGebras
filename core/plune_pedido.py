@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 
 import json
 import os
+import unicodedata
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -59,10 +60,11 @@ from .pipedrive_fields import (
     FIELD_GESTAO_ACL,
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_INDICADORES_QUALIDADE,
-    FIELD_NUMERO_CONTRATO_P1,
-    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_CODIGO_CLIENTE_INSTALACAO,
+    FIELD_NOTAS,
     FIELD_OBSERVACOES_DETALHES,
     FIELD_PERCENTUAL_EXITO,
+    FIELD_QUANTIDADE_UCS,
     FIELD_QUALIDADE_ENERGIA,
     FIELD_QTD_SOLE,
     FIELD_REGIONAL,
@@ -346,14 +348,88 @@ def _field_resolved(row: dict, field_name: str) -> str:
     return str(item or "")
 
 
+def _sem_acentos(texto: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+_UFS_BRASIL = frozenset(
+    {
+        "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT",
+        "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
+    }
+)
+
+_NOME_UF_PARA_SIGLA: dict[str, str] = {
+    _sem_acentos(nome).lower(): sigla
+    for sigla, nome in (
+        ("AC", "Acre"),
+        ("AL", "Alagoas"),
+        ("AP", "Amapá"),
+        ("AM", "Amazonas"),
+        ("BA", "Bahia"),
+        ("CE", "Ceará"),
+        ("DF", "Distrito Federal"),
+        ("ES", "Espírito Santo"),
+        ("GO", "Goiás"),
+        ("MA", "Maranhão"),
+        ("MT", "Mato Grosso"),
+        ("MS", "Mato Grosso do Sul"),
+        ("MG", "Minas Gerais"),
+        ("PA", "Pará"),
+        ("PB", "Paraíba"),
+        ("PR", "Paraná"),
+        ("PE", "Pernambuco"),
+        ("PI", "Piauí"),
+        ("RJ", "Rio de Janeiro"),
+        ("RN", "Rio Grande do Norte"),
+        ("RS", "Rio Grande do Sul"),
+        ("RO", "Rondônia"),
+        ("RR", "Roraima"),
+        ("SC", "Santa Catarina"),
+        ("SP", "São Paulo"),
+        ("SE", "Sergipe"),
+        ("TO", "Tocantins"),
+    )
+}
+
+
 def _normalizar_uf_plune(texto: str) -> str:
-    """UF do Plune (UFPrincipalId): código de 2 letras ou rótulo «RS - Rio Grande do Sul»."""
+    """
+    Converte qualquer formato comum do Plune/Pipedrive em sigla UF válida (Util.State).
+    Aceita: «RS», «RS - Rio Grande do Sul», «Rio Grande do Sul», «são paulo», etc.
+    Nunca infere UF cortando as 2 primeiras letras de um nome (ex.: «Rio Grande do Sul» → RI).
+    """
     texto = (texto or "").strip()
     if not texto:
         return ""
+
     if " - " in texto:
-        texto = texto.split(" - ", 1)[0].strip()
-    return texto[:2].upper()
+        prefixo, resto = texto.split(" - ", 1)
+        prefixo = prefixo.strip().upper()
+        if len(prefixo) == 2 and prefixo in _UFS_BRASIL:
+            return prefixo
+        texto = resto.strip()
+
+    candidato = texto.upper()
+    if len(candidato) == 2 and candidato in _UFS_BRASIL:
+        return candidato
+
+    chave = _sem_acentos(texto).lower()
+    return _NOME_UF_PARA_SIGLA.get(chave, "")
+
+
+def _uf_de_campo_plune(row: dict, campo: str) -> str:
+    """Lê UF de campo FK do Plune: prioriza value (código) e depois resolved (rótulo)."""
+    valor = _field_value(row, campo).strip()
+    if valor:
+        uf = _normalizar_uf_plune(valor)
+        if uf:
+            return uf
+    resolved = _field_resolved(row, campo).strip()
+    if resolved:
+        return _normalizar_uf_plune(resolved)
+    return ""
 
 
 _PARCEIRO_BROWSE_FIELDS = [
@@ -405,9 +481,9 @@ def _row_para_parceiro(row: dict) -> dict:
         "endereco": _field_value(row, "EnderecoPrincipal").strip(),
         "bairro": _field_value(row, "BairroPrincipal").strip(),
         "cidade": cidade.strip(),
-        "uf": _normalizar_uf_plune(
-            _field_resolved(row, "UFPrincipalId")
-            or _field_value(row, "UFPrincipalEx")
+        "uf": (
+            _uf_de_campo_plune(row, "UFPrincipalId")
+            or _normalizar_uf_plune(_field_value(row, "UFPrincipalEx"))
         ),
         "cep": _field_value(row, "CEPPrincipal").strip(),
         "email": _field_value(row, "EMail").strip(),
@@ -608,8 +684,14 @@ def _aplicar_dados_cliente_pedido(
         params["ClienteBairro"] = parceiro["bairro"][:72]
     if parceiro.get("cidade"):
         params["ClienteCityName"] = parceiro["cidade"][:60]
-    if parceiro.get("uf"):
-        params["ClienteStateId"] = parceiro["uf"][:2]
+    uf = _normalizar_uf_plune(parceiro.get("uf", ""))
+    if not uf and deal is not None:
+        from .pipedrive_fields import get_cidade_estado
+
+        _, uf_deal = get_cidade_estado(deal)
+        uf = _normalizar_uf_plune(uf_deal)
+    if uf:
+        params["ClienteStateId"] = uf
     cep = normalizar_cep(parceiro.get("cep", ""))
     if not cep and deal is not None:
         cep = normalizar_cep(get_val(deal, FIELD_CEP))
@@ -842,10 +924,9 @@ def _formatar_decimal_plune_numero(valor: float) -> str:
     return formatted.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _somar_ucs_pipedrive(deal: dict) -> float:
-    return sum(
-        (_decimal_pipe(get_val(deal, campo)) or 0.0) for campo in CAMPOS_SERVICO_UC
-    )
+def _quantidade_ucs_comissao(deal: dict) -> float:
+    """PercentualComissao recorrente: campo «Quantidade de UC's» do Pipedrive."""
+    return _decimal_pipe(get_val(deal, FIELD_QUANTIDADE_UCS)) or 0.0
 
 
 def _formatar_percentual_comissao_ucs(ucs: float) -> str:
@@ -862,7 +943,7 @@ def _montar_campos_comissao(
     Implantação: BaseComissao = valor do pedido; ValorComissao = valor do pedido;
     PercentualComissao = 0,001.
     Recorrente: BaseComissao = valor do pedido (mensalidade);
-    ValorComissao = 12 × valor do pedido; PercentualComissao = somatório das UCs.
+    ValorComissao = 12 × valor do pedido; PercentualComissao = Quantidade de UC's (Pipedrive).
     """
     deal_id = str(deal.get("id", ""))
     base_num = _decimal_pipe(valor_pedido)
@@ -885,11 +966,11 @@ def _montar_campos_comissao(
             "ValorComissao": base_fmt,
         }
 
-    ucs = _somar_ucs_pipedrive(deal)
+    ucs = _quantidade_ucs_comissao(deal)
     if ucs <= 0:
         raise PluneError(
-            f"Deal {deal_id}: pedido recorrente exige soma de UCs > 0 no Pipedrive "
-            "para PercentualComissao (comissão)."
+            f"Deal {deal_id}: pedido recorrente exige «Quantidade de UC's» > 0 no "
+            "Pipedrive para PercentualComissao (comissão)."
         )
     valor_comissao = base_num * float(PLUNE_COMISSAO_MESES_ANUAL)
     return {
@@ -923,8 +1004,13 @@ def _montar_observacoes_pedido(deal: dict, tipo_pedido: str) -> dict:
 
     observacao: list[str] = []
 
+    notas = get_val(deal, FIELD_NOTAS).strip()
     obs_pipe = get_val(deal, FIELD_OBSERVACOES_DETALHES).strip()
+    if notas:
+        observacao.append(notas)
     if obs_pipe:
+        if observacao:
+            observacao.append("")
         observacao.append(obs_pipe)
 
     if tipo_pedido == TIPO_PEDIDO_RECORRENTE and valor_mensal:

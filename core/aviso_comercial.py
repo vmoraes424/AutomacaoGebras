@@ -2,19 +2,9 @@
 
 from __future__ import annotations
 
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
-from .config import (
-    SMTP_FROM,
-    SMTP_HOST,
-    SMTP_PASSWORD,
-    SMTP_PORT,
-    SMTP_USE_TLS,
-    SMTP_USER,
-)
+from .config import GRAPH_SENDER_EMAIL
 from .gebras_defaults import EMAIL_COMERCIAL_AUTOMACAO
+from .graph_email_sender import EmailEnvelope, GraphEmailSender
 from .pipedrive_fields import (
     FIELD_DOCUMENTO,
     FIELD_QUANTIDADE_UCS,
@@ -133,46 +123,47 @@ Automação Gebras
     return assunto, corpo_texto, corpo_html
 
 
-def _smtp_configurado() -> bool:
-    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
+def _graph_configurado() -> bool:
+    return GraphEmailSender.configurado() and bool(GRAPH_SENDER_EMAIL)
 
 
 def enviar_aviso_comercial_etapa1(
     deal: dict, numeros_pedidos: dict[str, str] | None = None
 ) -> bool:
     """
-    Envia e-mail informativo para comercial@gebras.com (etapa 1, sem assinatura).
-    Retorna True se enviou; False se SMTP ausente ou falha (log no stdout).
+    Envia e-mail informativo para comercial@gebras.com via Microsoft Graph (etapa 1).
+    Requer tenant_id, client_id, client_secret e email no .env.
     """
     destino = EMAIL_COMERCIAL_AUTOMACAO
-    assunto, texto, html = montar_aviso_comercial(deal, numeros_pedidos)
+    assunto, _texto, html = montar_aviso_comercial(deal, numeros_pedidos)
     deal_id = str(deal.get("id", "")).strip()
 
-    if not _smtp_configurado():
+    if not _graph_configurado():
         print(
-            f"[*] Deal {deal_id}: aviso comercial (informativo) — SMTP não configurado "
-            f"no .env; e-mail não enviado para {destino!r}.",
+            f"[*] Deal {deal_id}: aviso comercial — Graph não configurado "
+            f"(tenant_id, client_id, client_secret, email no .env). "
+            f"E-mail não enviado para {destino!r}.",
             flush=True,
         )
         print(f"    Assunto: {assunto}", flush=True)
-        print(f"    Plune: {formatar_linha_pedidos_plune_contrato(numeros_pedidos or {})}", flush=True)
+        print(
+            f"    Plune: {formatar_linha_pedidos_plune_contrato(numeros_pedidos or {})}",
+            flush=True,
+        )
         return False
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = assunto
-    msg["From"] = SMTP_FROM or SMTP_USER
-    msg["To"] = destino
-    msg.attach(MIMEText(texto, "plain", "utf-8"))
-    msg.attach(MIMEText(html, "html", "utf-8"))
-
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=60) as smtp:
-            if SMTP_USE_TLS:
-                smtp.starttls()
-            smtp.login(SMTP_USER, SMTP_PASSWORD)
-            smtp.sendmail(msg["From"], [destino], msg.as_string())
+        GraphEmailSender().send(
+            EmailEnvelope(
+                sender=GRAPH_SENDER_EMAIL,
+                recipients=[destino],
+                subject=assunto,
+                html_body=html,
+            )
+        )
         print(
-            f"[v] Deal {deal_id}: aviso informativo enviado para {destino} (etapa 1).",
+            f"[v] Deal {deal_id}: aviso informativo enviado para {destino} "
+            f"(etapa 1, Microsoft Graph).",
             flush=True,
         )
         return True

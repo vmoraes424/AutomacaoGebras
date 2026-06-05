@@ -8,7 +8,7 @@ import pytest
 from core.hub_pedido import (
     HubPedidoError,
     _id_plune_recorrente_para_hub,
-    _parse_codigos_instalacao_p1,
+    _parse_codigos_notas,
     _parse_observacoes_uc_hub,
     _perc_economia_do_deal,
     _resolver_token_servico_hub,
@@ -76,22 +76,53 @@ def test_perc_economia_do_deal(label, tem, perc):
         ("665,665", [665]),
     ],
 )
-def test_parse_codigos_instalacao_p1(p1, esperado):
-    assert _parse_codigos_instalacao_p1(p1) == esperado
+def test_parse_codigos_notas(p1, esperado):
+    assert _parse_codigos_notas(p1) == esperado
+
+
+def test_p1_p2_campo_combinado_cliente_barra_instalacao():
+    from core.hub_pedido import _p1_p2_do_deal
+
+    deal = {
+        "custom_fields": {
+            "41a3157128d51e2fc803eeec4b242efafcb55b4e": "352/665,1942",
+        }
+    }
+    assert _p1_p2_do_deal(deal) == ([665, 1942], 352)
+
+
+def test_erros_validacao_aceita_formato_cliente_barra_instalacao():
+    deal = {
+        "id": 746,
+        "custom_fields": {
+            "41a3157128d51e2fc803eeec4b242efafcb55b4e": "352/1234",
+            "4fba2f9323c64acdcac770e38f2c0cdb840796bc": "",
+        },
+    }
+    erros = erros_validacao_observacoes_hub(deal)
+    assert not any("deve ser numérico" in e for e in erros)
 
 
 def test_observacoes_vazio_opcional_no_ganho_obrigatorio_no_hub():
     deal = {
         "id": 1,
         "custom_fields": {
-            "14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b": "665",
-            "41a3157128d51e2fc803eeec4b242efafcb55b4e": "100",
+            "41a3157128d51e2fc803eeec4b242efafcb55b4e": "100/665",
             "4fba2f9323c64acdcac770e38f2c0cdb840796bc": "",
         },
     }
     assert erros_validacao_observacoes_hub(deal) == []
     with pytest.raises(HubPedidoError, match="obrigatório"):
         validar_observacoes_hub_obrigatorias("1", "", [665], 100)
+
+
+def test_observacoes_independente_de_notas_usa_instalacoes_do_campo():
+    texto = (
+        "UC = 00665 - SOLE WEB + Gestão ACL - Mercado Livre de Energia = 1.500,92; "
+        "UC = 01942 - ACL + Sole Consultoria = 454.564,00"
+    )
+    linhas = validar_observacoes_hub_obrigatorias("746", texto, [1234, 3456], 352)
+    assert [linha.codigo_instalacao for linha in linhas] == [1234, 3456]
 
 
 def test_observacoes_sem_formato_uc():
@@ -267,3 +298,13 @@ def test_remover_pedido_hub_por_deal_remove():
             stats = remover_pedido_hub_por_deal("1")
     assert stats["hub_pedido"] == 1
     mock_rm.assert_called_once_with(100)
+
+
+def test_criar_pedido_hub_pula_quando_pular_hub():
+    with patch("core.hub_pedido.PULAR_HUB", True):
+        out = criar_pedido_hub("99")
+    assert out == {
+        "status": "skipped",
+        "deal_id": "99",
+        "reason": "hub_criacao_desabilitada",
+    }

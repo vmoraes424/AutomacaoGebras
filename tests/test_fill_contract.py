@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from core.automacao_contrato import fill_contract
+from core.automacao_contrato import aplicar_fonte_calibri_documento, fill_contract
 from core.plune_pedido import TIPO_PEDIDO_IMPLANTACAO, TIPO_PEDIDO_RECORRENTE
 from core.pipedrive_fields import (
     FIELD_CIDADE,
@@ -211,3 +211,18 @@ def test_fill_contract_usa_template_path(mock_exists, mock_docx_cls, mock_parcei
 
     fill_contract(deal, template_path="X.docx")
     mock_docx_cls.assert_called_once_with("X.docx")
+    doc.render.assert_called_once()
+    doc.docx  # acessado por aplicar_fonte_calibri_documento
+
+
+def test_aplicar_fonte_calibri_normaliza_runs(tmp_path):
+    from docx import Document
+
+    doc = Document()
+    para = doc.add_paragraph()
+    run = para.add_run("7978")
+    run.font.name = "Times New Roman"
+
+    aplicar_fonte_calibri_documento(doc)
+
+    assert run.font.name == "Calibri"

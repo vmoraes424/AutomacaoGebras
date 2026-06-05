@@ -53,7 +53,7 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
 }
 _SEED_DEFAULT_BRANCH_ID = "751"
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 10
 _initialized = False
 
 
@@ -145,10 +145,9 @@ def _init_schema(conn: DbConnection) -> None:
         """,
         """
         CREATE TABLE IF NOT EXISTS deals_processed (
-            deal_id VARCHAR(32) NOT NULL,
+            deal_id VARCHAR(32) NOT NULL PRIMARY KEY,
             won_time VARCHAR(64) NOT NULL,
-            processed_at VARCHAR(64) NOT NULL,
-            PRIMARY KEY (deal_id, won_time)
+            processed_at VARCHAR(64) NOT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
         """
@@ -223,6 +222,40 @@ def _init_schema(conn: DbConnection) -> None:
         ("schema_version", str(_SCHEMA_VERSION)),
     )
     _migrate_schema(conn)
+
+
+def _migrate_deals_processed_pk_deal_id(conn: DbConnection) -> None:
+    """
+    Idempotência por deal_id (não por deal_id|update_time).
+
+    O Pipedrive altera update_time quando a automação anota o deal; a chave composta
+    antiga permitia reprocessar o mesmo fluxo a cada poll.
+    """
+    rows = conn.execute(
+        "SELECT deal_id, won_time, processed_at FROM deals_processed ORDER BY deal_id, processed_at DESC"
+    ).fetchall()
+    vistos: set[str] = set()
+    for row in rows:
+        deal_id = str(row["deal_id"])
+        if deal_id in vistos:
+            conn.execute(
+                "DELETE FROM deals_processed WHERE deal_id = %s AND won_time = %s",
+                (deal_id, row["won_time"]),
+            )
+        else:
+            vistos.add(deal_id)
+    try:
+        conn.execute("ALTER TABLE deals_processed DROP PRIMARY KEY")
+    except pymysql.err.OperationalError as exc:
+        # 1091 = check that column/key exists (já migrado)
+        if exc.args[0] != 1091:
+            raise
+    try:
+        conn.execute("ALTER TABLE deals_processed ADD PRIMARY KEY (deal_id)")
+    except pymysql.err.OperationalError as exc:
+        # 1068 = Multiple primary key defined
+        if exc.args[0] != 1068:
+            raise
 
 
 def _migrate_schema(conn: DbConnection) -> None:
@@ -338,6 +371,8 @@ def _migrate_schema(conn: DbConnection) -> None:
             except pymysql.err.OperationalError as exc:
                 if exc.args[0] != 1060:
                     raise
+    if version < 10:
+        _migrate_deals_processed_pk_deal_id(conn)
     conn.execute(
         "UPDATE app_meta SET value = %s WHERE `key` = 'schema_version'",
         (str(_SCHEMA_VERSION),),
@@ -489,18 +524,17 @@ def upsert_branch_config(
 
 
 def carregar_deals_processados() -> tuple[set[str], set[str]]:
+    """Retorna (deal_ids com fluxo Contrato concluído, deal_ids bloqueados legado)."""
     with db_conn() as conn:
-        eventos = {
-            f"{r['deal_id']}|{r['won_time']}"
-            for r in conn.execute(
-                "SELECT deal_id, won_time FROM deals_processed"
-            ).fetchall()
+        processados = {
+            str(r["deal_id"])
+            for r in conn.execute("SELECT deal_id FROM deals_processed").fetchall()
         }
         legado = {
-            r["deal_id"]
+            str(r["deal_id"])
             for r in conn.execute("SELECT deal_id FROM deals_legacy_block").fetchall()
         }
-    return eventos, legado
+    return processados, legado
 
 
 def salvar_deal_processado(
@@ -512,8 +546,11 @@ def salvar_deal_processado(
     def _write(c: DbConnection) -> None:
         c.execute(
             """
-            INSERT IGNORE INTO deals_processed (deal_id, won_time, processed_at)
+            INSERT INTO deals_processed (deal_id, won_time, processed_at)
             VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                won_time = VALUES(won_time),
+                processed_at = VALUES(processed_at)
             """,
             (deal_id, won_raw, _utc_now()),
         )

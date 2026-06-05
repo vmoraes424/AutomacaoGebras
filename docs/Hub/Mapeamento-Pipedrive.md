@@ -6,8 +6,8 @@ Hashes em [`core/pipedrive_fields.py`](../../core/pipedrive_fields.py) e lista e
 
 | Campo Pipedrive | Hash | Uso no HUB |
 |-----------------|------|------------|
-| Código da Instalação | `FIELD_NUMERO_CONTRATO_P1` | `instalacao.Codigo` — **vários** separados por vírgula (`665,1942`) geram uma linha em `pedido_instalacao_extra` / `pedido_instalacao_servico` por instalação |
-| Código Cliente | `FIELD_NUMERO_CONTRATO_P2` | `instalacao.cod_cliente` (mesmo cliente para todas) |
+| Notas | `FIELD_NOTAS` | `instalacao.Codigo` — **vários** separados por vírgula (`665,1942`) geram uma linha em `pedido_instalacao_extra` / `pedido_instalacao_servico` por instalação |
+| Código Cliente/Código da Instalação | `FIELD_CODIGO_CLIENTE_INSTALACAO` | `instalacao.cod_cliente` (mesmo cliente para todas) |
 
 Validação (por código de instalação):
 

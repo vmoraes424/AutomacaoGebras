@@ -14,6 +14,9 @@ import base64
 import hashlib
 import glob
 from datetime import datetime, timedelta, timezone
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.text.run import Run
 from docxtpl import DocxTemplate
 
 from core.config import (
@@ -29,6 +32,7 @@ from core.config import (
     CORTE_TEMPORAL_GRACE_MINUTOS,
     TESTE_PLUNE_SEM_ASSINATURA,
     DEV_HUB_SEM_APROVACAO_PLUNE,
+    PULAR_HUB,
 )
 from core.database import (
     carregar_deals_processados,
@@ -54,19 +58,20 @@ from core.plune_pedido import (
     obter_numeros_pedidos_plune_deal,
 )
 from core.pipedrive_stages import (
-    garantir_deal_em_etapa_contrato,
-    garantir_deal_em_etapa_negociacao,
+    deal_esta_em_etapa_contrato,
+    marcar_deal_como_ganho,
 )
 from core.pipedrive_validations import (
     DealValidationError,
+    notificar_validacao_aprovada,
     reabrir_deal_com_erros,
+    reabrir_deal_falha_automacao,
     validar_deal_para_automacao,
 )
-from core.gebras_defaults import PIPEDRIVE_STAGE_NEGOCIACAO_NOME
+from core.gebras_defaults import PIPEDRIVE_STAGE_CONTRATO_NOME
 from core.pipedrive_fields import (
     FIELD_CONTATO_CONTRATANTE,
     FIELD_CONTATO_FINANCEIRO,
-    FIELD_CONTATO_GESTOR,
     FIELD_DATA_IMPLANTACAO,
     FIELD_DATA_PRIMEIRA_COBRANCA,
     FIELD_DOCUMENTO,
@@ -77,12 +82,14 @@ from core.pipedrive_fields import (
     FIELD_INDICADORES_QUALIDADE,
     FIELD_INSCRICAO_ESTADUAL,
     FIELD_INSCRICAO_MUNICIPAL,
+    FIELD_NOTAS,
     FIELD_PERCENTUAL_EXITO,
     FIELD_QTD_SOLE,
     FIELD_QUALIDADE_ENERGIA,
     FIELD_VALOR_IMPLANTACAO,
     FIELD_VALOR_MENSAL,
     extrair_signatarios,
+    signatarios_omitidos_por_email_duplicado,
     formatar_data_hora_brasilia,
     formatar_data_ptbr,
     formatar_quantidade_uc,
@@ -90,6 +97,7 @@ from core.pipedrive_fields import (
     get_nome_cliente,
     get_numero_contrato,
     get_cidade_estado,
+    get_contato_gestor_contrato,
     get_val,
 )
 from core.pipedrive_files import baixar_docx_contrato_padrao_deal
@@ -98,15 +106,17 @@ from core.aviso_comercial import enviar_aviso_comercial_etapa1
 # --- CONFIGURAÇÕES (ver config.py) ---
 API_TOKEN = PIPEDRIVE_API_TOKEN
 
-# Limite de won_time (UTC): definido em main() com margem CORTE_TEMPORAL_GRACE_MINUTOS
+# Corte temporal (UTC) por update_time do deal na etapa Contrato
 DATA_INICIO_SCRIPT: datetime | None = None
 
 # Evita repetir o mesmo aviso sobre linha legada em deals_processados a cada ciclo
 _deals_legado_ja_avisados: set[str] = set()
+# Uma anotação de validação OK por deal (a nota altera update_time e não deve repetir na regeneração)
+_deals_validacao_aprovada_avisados: set[str] = set()
 
 
 def inicializar_corte_temporal() -> datetime:
-    """UTC: won_time do deal deve ser >= este instante (com margem antes do arranque)."""
+    """UTC: update_time do deal deve ser >= este instante (com margem antes do arranque)."""
     global DATA_INICIO_SCRIPT
     agora = datetime.now(timezone.utc)
     DATA_INICIO_SCRIPT = agora - timedelta(minutes=CORTE_TEMPORAL_GRACE_MINUTOS)
@@ -114,11 +124,11 @@ def inicializar_corte_temporal() -> datetime:
 
 
 # ---------- GERENCIAMENTO DE ESTADO ----------
-def _parse_won_time_utc(won_time_str: str) -> datetime | None:
+def _parse_deal_timestamp_utc(timestamp_str: str) -> datetime | None:
     """ISO-8601 do Pipedrive (Z, offset, fração de segundos)."""
-    if not won_time_str or not isinstance(won_time_str, str):
+    if not timestamp_str or not isinstance(timestamp_str, str):
         return None
-    s = won_time_str.strip()
+    s = timestamp_str.strip()
     if not s:
         return None
     if s.endswith("Z"):
@@ -477,7 +487,13 @@ class ClicksignClient:
 
 
 # ---------- FLUXO RÁPIDO (FIRE & FORGET COM GRUPOS) ----------
-def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: list):
+def clicksign_fire_and_forget(
+    doc_path: str,
+    envelope_name: str,
+    sign_sequence: list,
+    *,
+    omitidos: list[dict] | None = None,
+):
     cs = ClicksignClient(CLICKSIGN_BASE_URL, CLICKSIGN_ACCESS_TOKEN)
 
     print(f"[*] 1. Criando envelope '{envelope_name}'...")
@@ -487,8 +503,13 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: 
     document_id = cs.upload_document_base64(envelope_id, doc_path)
 
     print(
-        f"[*] 3. Configurando {len(sign_sequence)} signatários (Sequencial por Grupos)..."
+        "[*] 3. Ordem Consultor → Coordenador → Cliente → Diretor — "
+        f"{len(sign_sequence)} signatário(s) ativo(s)...",
     )
+    for om in omitidos or []:
+        print(
+            f"    > {om['papel']} ({om['email']}) omitido — {om.get('motivo', 'e-mail duplicado')}.",
+        )
     first_group = min((p.get("group", 1) for p in sign_sequence), default=1)
     first_group_signer_ids: list[str] = []
 
@@ -502,8 +523,9 @@ def clicksign_fire_and_forget(doc_path: str, envelope_name: str, sign_sequence: 
 
         if group_num == first_group:
             first_group_signer_ids.append(signer_id)
+        rotulo = person.get("papel") or person["name"]
         print(
-            f"    > {person['name']} ({person['email']}) adicionado ao Grupo {group_num}."
+            f"    > {rotulo} ({person['email']}) adicionado ao Grupo {group_num}."
         )
 
     print("[*] 4. Ativando envelope...")
@@ -533,6 +555,65 @@ def _disparar_aviso_comercial_etapa1(
 
 
 # ---------- GERAÇÃO DO CONTRATO ----------
+FONTE_CONTRATO = "Calibri"
+
+
+def _definir_fonte_run_calibri(run) -> None:
+    """Garante Calibri no run (docxtpl pode herdar Times New Roman do template)."""
+    if not run.text:
+        return
+    run.font.name = FONTE_CONTRATO
+    r_pr = run._element.get_or_add_rPr()
+    r_fonts = r_pr.find(qn("w:rFonts"))
+    if r_fonts is None:
+        r_fonts = OxmlElement("w:rFonts")
+        r_pr.insert(0, r_fonts)
+    for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+        r_fonts.set(qn(attr), FONTE_CONTRATO)
+
+
+def _iter_runs_paragrafo(para):
+    for child in para._element:
+        if child.tag == qn("w:hyperlink"):
+            for r_elem in child.findall(qn("w:r")):
+                yield Run(r_elem, para)
+        elif child.tag == qn("w:r"):
+            yield Run(child, para)
+
+
+def _iter_blocos_texto_documento(document):
+    for para in document.paragraphs:
+        yield para
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    yield para
+    for section in document.sections:
+        for bloco in (
+            section.header,
+            section.footer,
+            section.first_page_header,
+            section.first_page_footer,
+        ):
+            if bloco is None:
+                continue
+            for para in bloco.paragraphs:
+                yield para
+            for table in bloco.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            yield para
+
+
+def aplicar_fonte_calibri_documento(document) -> None:
+    """Normaliza a fonte de todo texto gerado no contrato (inclui hyperlinks)."""
+    for para in _iter_blocos_texto_documento(document):
+        for run in _iter_runs_paragrafo(para):
+            _definir_fonte_run_calibri(run)
+
+
 def fill_contract(
     deal_data,
     *,
@@ -639,14 +720,16 @@ def fill_contract(
         ),
         "data_pagamento_implantacao": dt_implantacao,
         "data_pagamento_primeira_cobranca": dt_primeira_cobranca,
-        "contato_gestor": get_val(deal_data, FIELD_CONTATO_GESTOR),
+        "contato_gestor": get_contato_gestor_contrato(deal_data),
         "contato_financeiro": get_val(deal_data, FIELD_CONTATO_FINANCEIRO),
         "contato_contratante": get_val(deal_data, FIELD_CONTATO_CONTRATANTE),
+        "notas": get_val(deal_data, FIELD_NOTAS).strip(),
     }
 
     clean_title = str(deal_data.get("title", "SemTitulo")).replace("/", "-")
     nome_saida = f"{PASTA_SAIDA}/Contrato_{deal_data['id']}_{clean_title}.docx"
     doc.render(contexto)
+    aplicar_fonte_calibri_documento(doc.docx)
     doc.save(nome_saida)
     print(f"[v] Contrato Gerado: {nome_saida}")
     return nome_saida
@@ -746,8 +829,8 @@ def _salvar_template_deal_local(
 
 
 # ---------- NOVO FLUXO: POLLING DA API ----------
-def buscar_deals_ganhos():
-    """Lista deals ganhos no Pipedrive (API v2), com paginação por cursor."""
+def buscar_deals_etapa_contrato():
+    """Lista deals abertos na etapa Contrato (API v2), com paginação por cursor."""
     url = "https://api.pipedrive.com/api/v2/deals"
     headers = {"x-api-token": API_TOKEN}
     deals: list[dict] = []
@@ -755,7 +838,7 @@ def buscar_deals_ganhos():
 
     try:
         while True:
-            params: dict = {"status": "won", "limit": 500}
+            params: dict = {"status": "open", "limit": 500}
             if cursor:
                 params["cursor"] = cursor
             response = requests.get(url, params=params, headers=headers, timeout=60)
@@ -768,7 +851,9 @@ def buscar_deals_ganhos():
             page = body.get("data") or []
             if isinstance(page, dict):
                 page = [page]
-            deals.extend(page)
+            for deal in page:
+                if deal_esta_em_etapa_contrato(deal):
+                    deals.append(deal)
             cursor = (body.get("additional_data") or {}).get("next_cursor")
             if not cursor:
                 break
@@ -807,7 +892,7 @@ def _fluxo_hub_pre_aprovacao(
     tentar_sincronizar_pedido_hub_deal(
         deal_id,
         parceiro_plune_criado=parceiro_criado_plune,
-        permitir_criacao=DEV_HUB_SEM_APROVACAO_PLUNE,
+        permitir_criacao=DEV_HUB_SEM_APROVACAO_PLUNE and not PULAR_HUB,
     )
 
 
@@ -851,6 +936,20 @@ def log_resultado_plune(deal_id: str, result: dict) -> None:
         )
 
 
+def _reabrir_deal_apos_falha(deal_id: str, mensagem: str) -> None:
+    print(
+        f"[!] Deal {deal_id}: reabrindo card no Pipedrive (etapa Negociação).",
+        flush=True,
+    )
+    print(f"    - {mensagem}", flush=True)
+    reabrir_deal_falha_automacao(deal_id, [mensagem])
+    print(
+        f"[v] Deal {deal_id} reaberto no Pipedrive. Não foi gravado em deals_processed; "
+        "após corrigir, mova novamente para Contrato.",
+        flush=True,
+    )
+
+
 def criar_pedidos_plune_no_ganho(deal_id: str, contexto_envio: str) -> None:
     print(
         f"    -> Criando/garantindo dois pedidos no Plune ({contexto_envio}; deal {deal_id})...",
@@ -869,7 +968,7 @@ def criar_pedidos_plune_no_ganho(deal_id: str, contexto_envio: str) -> None:
         reabrir_deal_com_erros(deal_id, validation_error.mensagens)
         print(
             f"[*] Se o deal {deal_id} já estava em deals_processados, remova o estado com "
-            f"`python scripts/automacao_db.py rm deal {deal_id} -y` antes de ganhar de novo.",
+            f"`python scripts/automacao_db.py rm deal {deal_id} -y` antes de mover para Contrato de novo.",
             flush=True,
         )
     except PluneError as exc:
@@ -877,30 +976,48 @@ def criar_pedidos_plune_no_ganho(deal_id: str, contexto_envio: str) -> None:
             f"[!] Plune: FALHA ao criar/garantir pedidos para deal {deal_id}: {exc}",
             flush=True,
         )
+        _reabrir_deal_apos_falha(deal_id, f"Plune: {exc}")
+
+
+def _envelope_clicksign_real(envelope_id: str | None) -> bool:
+    eid = str(envelope_id or "").strip()
+    return bool(eid) and not eid.startswith("sem-envelope-")
+
+
+def _retomar_fluxo_interrompido(registro: dict | None) -> bool:
+    """
+    Retoma Plune/contrato quando há estado em envelopes_pending mas deals_processed
+    ainda não foi gravado (falha parcial ou queda do processo).
+
+    Poll com deal já em deals_processed é ignorado antes deste ponto.
+    Para reprocessar do zero: `automacao_db rm deal <id>` e mover o card para Contrato.
+    """
+    return registro is not None
 
 
 def processar_deals_pendentes():
     """Função principal executada a cada ciclo do loop."""
     limpar_templates_orfaos_runtime()
-    deals = buscar_deals_ganhos()
+    deals = buscar_deals_etapa_contrato()
     if not deals:
         print(
-            f"[*] Pipedrive: listagem de deals ganhos veio vazia (ou erro acima).",
+            f"[*] Pipedrive: nenhum deal aberto na etapa "
+            f"«{PIPEDRIVE_STAGE_CONTRATO_NOME}» (ou erro acima).",
             flush=True,
         )
         return
 
-    eventos_ok, ids_legado = carregar_deals_processados()
-    n_won = len(deals)
-    n_sem_won = n_legado = n_dup = n_data = n_corte = 0
+    ids_processados, ids_legado = carregar_deals_processados()
+    n_contrato = len(deals)
+    n_sem_evento = n_legado = n_dup = n_data = n_corte = 0
     algum_processado = False
 
     for deal in deals:
         deal_id = str(deal.get("id"))
-        won_time_str = deal.get("won_time")
+        evento_str = deal.get("update_time") or deal.get("add_time")
 
-        if not won_time_str:
-            n_sem_won += 1
+        if not evento_str:
+            n_sem_evento += 1
             continue
 
         if deal_id in ids_legado:
@@ -909,63 +1026,49 @@ def processar_deals_pendentes():
                 _deals_legado_ja_avisados.add(deal_id)
                 print(
                     f"[*] Deal {deal_id} («{deal.get('title')}») ignorado: está em "
-                    f"deals_processados (MySQL) só com o id (formato antigo). "
-                    f"Remova a linha «{deal_id}» para permitir novo ganho ou use linhas «id|won_time».",
+                    f"deals_legacy_block (MySQL). "
+                    f"Remova a linha «{deal_id}» para reprocessar.",
                     flush=True,
                 )
             continue
 
-        chave_evento = f"{deal_id}|{won_time_str}"
-        if chave_evento in eventos_ok:
+        if deal_id in ids_processados:
             n_dup += 1
             continue
 
-        won_time_dt = _parse_won_time_utc(won_time_str)
-        if won_time_dt is None:
+        registro = buscar_por_deal_id(deal_id)
+
+        evento_dt = _parse_deal_timestamp_utc(evento_str)
+        if evento_dt is None:
             n_data += 1
             print(
-                f"[!] Deal {deal_id}: won_time em formato não reconhecido: {won_time_str!r}",
+                f"[!] Deal {deal_id}: update_time em formato não reconhecido: {evento_str!r}",
                 flush=True,
             )
             continue
 
-        if DATA_INICIO_SCRIPT is not None and won_time_dt < DATA_INICIO_SCRIPT:
+        if DATA_INICIO_SCRIPT is not None and evento_dt < DATA_INICIO_SCRIPT:
             n_corte += 1
             continue
 
         print(
-            f"\n[!] NOVO DEAL GANHO DETECTADO! Deal ID: {deal_id} | Título: {deal.get('title')}",
+            f"\n[!] DEAL NA ETAPA CONTRATO — automação disparada! "
+            f"Deal ID: {deal_id} | Título: {deal.get('title')}",
             flush=True,
         )
 
         try:
-            try:
-                if garantir_deal_em_etapa_negociacao(deal):
-                    print(
-                        f"    -> Deal {deal_id} movido para etapa "
-                        f"«{PIPEDRIVE_STAGE_NEGOCIACAO_NOME}» no Pipedrive.",
-                        flush=True,
-                    )
-            except RuntimeError as exc:
-                print(
-                    f"[!] Deal {deal_id}: falha ao mover para "
-                    f"«{PIPEDRIVE_STAGE_NEGOCIACAO_NOME}»: {exc}",
-                    flush=True,
-                )
-                continue
-
-            # Regra de regeneração:
-            # - Se pedidos Plune já estiverem aprovados, bloqueia qualquer novo ganho.
-            # - Se houver envelope pendente (não aprovado), é regeneração: cancela envelope antigo,
-            #   atualiza pedidos existentes e cria novo contrato/envelope.
-            registro = buscar_por_deal_id(deal_id)
+            # Idempotência: deal em deals_processed é ignorado no início do loop (poll).
+            # Retomada: envelope_pending sem deals_processed (falha parcial / queda do processo).
+            # Reprocessar do zero: `automacao_db rm deal <id>` e mover o card para Contrato.
             if registro and registro.get("pedidos_plune_aprovados"):
                 print(
                     f"[*] Deal {deal_id}: ignorado — pedidos Plune já aprovados "
                     "(regra: sem regeneração após última assinatura).",
                     flush=True,
                 )
-                salvar_deal_processado(deal_id, won_time_str)
+                salvar_deal_processado(deal_id, evento_str)
+                ids_processados.add(deal_id)
                 algum_processado = True
                 continue
 
@@ -982,17 +1085,38 @@ def processar_deals_pendentes():
                 algum_processado = True
                 print(
                     f"[v] Deal {deal_id} reaberto no Pipedrive. Não foi gravado no MySQL (deals_processed); "
-                    "após corrigir os campos e ganhar novamente, ele será processado.",
+                    "após corrigir os campos e mover novamente para Contrato, ele será processado.",
                     flush=True,
                 )
                 continue
 
-            # Plune: criar ou atualizar pedidos antes do contrato
+            # Só na 1ª passagem (sem envelope pendente). Regeneração e a própria nota
+            # mudam update_time — não repetir anotação de validação OK.
+            if not registro and deal_id not in _deals_validacao_aprovada_avisados:
+                _deals_validacao_aprovada_avisados.add(deal_id)
+                try:
+                    if notificar_validacao_aprovada(deal_id):
+                        print(
+                            f"[v] Deal {deal_id}: validação OK — anotação registrada no Pipedrive.",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[*] Deal {deal_id}: validação OK — anotação já existia no Pipedrive.",
+                            flush=True,
+                        )
+                except Exception as exc:
+                    print(
+                        f"[!] Deal {deal_id}: validação OK, mas falha ao notificar Pipedrive: {exc}",
+                        flush=True,
+                    )
+
+            # Plune: criar ou retomar (estado em envelopes_pending sem deals_processed)
             numeros_pedidos: dict[str, str] = {}
             parceiro_criado_plune = False
-            if registro:
+            if _retomar_fluxo_interrompido(registro):
                 print(
-                    f"    -> Regeneração: atualizando pedidos no Plune (deal {deal_id})...",
+                    f"    -> Retomada: atualizando pedidos no Plune (deal {deal_id})...",
                     flush=True,
                 )
                 try:
@@ -1021,6 +1145,8 @@ def processar_deals_pendentes():
                         f"[!] Plune: FALHA ao atualizar pedidos (deal {deal_id}): {exc}",
                         flush=True,
                     )
+                    _reabrir_deal_apos_falha(deal_id, f"Plune: {exc}")
+                    algum_processado = True
                     continue
             else:
                 print(
@@ -1067,6 +1193,8 @@ def processar_deals_pendentes():
                         f"[!] Plune: FALHA ao criar pedidos antes do contrato (deal {deal_id}): {exc}",
                         flush=True,
                     )
+                    _reabrir_deal_apos_falha(deal_id, f"Plune: {exc}")
+                    algum_processado = True
                     continue
 
             print(f"    -> Gerando contrato...", flush=True)
@@ -1080,7 +1208,7 @@ def processar_deals_pendentes():
                     template_file_id = file_id
                     template_path = _salvar_template_deal_local(
                         deal_id=deal_id,
-                        won_time=won_time_str,
+                        won_time=evento_str,
                         file_id=file_id,
                         nome=nome_tpl,
                         conteudo=conteudo_tpl,
@@ -1114,6 +1242,17 @@ def processar_deals_pendentes():
 
             sequence_dinamica = extrair_signatarios(deal)
 
+            if not doc_path:
+                print(
+                    f"[!] Deal {deal_id}: falha ao gerar contrato (.docx).",
+                    flush=True,
+                )
+                _reabrir_deal_apos_falha(
+                    deal_id, "Falha ao gerar o arquivo do contrato (.docx)."
+                )
+                algum_processado = True
+                continue
+
             if doc_path:
 
                 def _apos_contrato_dev_sem_envelope_msg():
@@ -1130,21 +1269,50 @@ def processar_deals_pendentes():
                         f"API Clicksign não será chamada.",
                         flush=True,
                     )
-                    _disparar_aviso_comercial_etapa1(deal, numeros_pedidos)
-                    salvar_deal_processado(deal_id, won_time_str)
+                    parceiro_para_envelope = parceiro_criado_plune
+                    if registro:
+                        parceiro_para_envelope = bool(
+                            registro.get("parceiro_plune_criado")
+                        ) or parceiro_criado_plune
+                    salvar_envelope_pendente(
+                        deal_id,
+                        f"sem-envelope-{deal_id}",
+                        f"Deal {deal_id} (DEV sem Clicksign)",
+                        template_file_id=template_file_id,
+                        template_local_path=template_path,
+                        parceiro_plune_criado=parceiro_para_envelope,
+                    )
+                    salvar_deal_processado(deal_id, evento_str)
+                    ids_processados.add(deal_id)
                     algum_processado = True
+                    print(
+                        f"[v] Deal {deal_id} registrado no MySQL (DEV sem Clicksign).",
+                        flush=True,
+                    )
+                    try:
+                        _disparar_aviso_comercial_etapa1(deal, numeros_pedidos)
+                    except Exception as exc:
+                        print(
+                            f"[!] Deal {deal_id}: aviso comercial falhou (fluxo já registrado): {exc}",
+                            flush=True,
+                        )
                     _apos_contrato_dev_sem_envelope_msg()
                 elif len(sequence_dinamica) > 0:
                     print(f"    -> Enviando para Clicksign...", flush=True)
                     envelope_name = f"Contrato Deal {deal_id} - {deal.get('title')}"
 
-                    # Regeneração: cancela envelope antigo antes de criar o novo.
-                    if registro and registro.get("envelope_id"):
+                    # Regeneração: cancela envelope Clicksign real antes de criar o novo.
+                    envelope_antigo = (
+                        str(registro["envelope_id"])
+                        if registro and registro.get("envelope_id")
+                        else ""
+                    )
+                    if _envelope_clicksign_real(envelope_antigo):
                         try:
                             cs_tmp = ClicksignClient(
                                 CLICKSIGN_BASE_URL, CLICKSIGN_ACCESS_TOKEN
                             )
-                            cs_tmp.cancel_envelope(str(registro["envelope_id"]))
+                            cs_tmp.cancel_envelope(envelope_antigo)
                         except Exception as exc:
                             print(
                                 f"[!] Clicksign: falha ao tentar cancelar envelope antigo "
@@ -1153,9 +1321,13 @@ def processar_deals_pendentes():
                             )
 
                     envelope_id = clicksign_fire_and_forget(
-                        doc_path, envelope_name, sequence_dinamica
+                        doc_path,
+                        envelope_name,
+                        sequence_dinamica,
+                        omitidos=signatarios_omitidos_por_email_duplicado(
+                            deal, sequence_dinamica
+                        ),
                     )
-                    _disparar_aviso_comercial_etapa1(deal, numeros_pedidos)
 
                     parceiro_para_envelope = parceiro_criado_plune
                     if registro:
@@ -1170,12 +1342,20 @@ def processar_deals_pendentes():
                         template_local_path=template_path,
                         parceiro_plune_criado=parceiro_para_envelope,
                     )
-                    salvar_deal_processado(deal_id, won_time_str)
+                    salvar_deal_processado(deal_id, evento_str)
+                    ids_processados.add(deal_id)
                     algum_processado = True
                     print(
                         f"[v] Contrato enviado ao Clicksign. Deal {deal_id} registrado no MySQL.",
                         flush=True,
                     )
+                    try:
+                        _disparar_aviso_comercial_etapa1(deal, numeros_pedidos)
+                    except Exception as exc:
+                        print(
+                            f"[!] Deal {deal_id}: aviso comercial falhou (fluxo já registrado): {exc}",
+                            flush=True,
+                        )
 
                     if not TESTE_PLUNE_SEM_ASSINATURA:
                         print(
@@ -1188,21 +1368,35 @@ def processar_deals_pendentes():
                         "[!] Nenhum e-mail de signatário encontrado no Deal. Contrato não enviado para assinatura.",
                         flush=True,
                     )
+                    _reabrir_deal_apos_falha(
+                        deal_id,
+                        "Nenhum e-mail de signatário encontrado no deal; "
+                        "contrato não enviado para assinatura.",
+                    )
+                    algum_processado = True
 
         except Exception as e:
             print(f"[!] Erro ao processar Deal {deal_id}: {e}", flush=True)
             traceback.print_exc()
+            try:
+                _reabrir_deal_apos_falha(deal_id, str(e))
+                algum_processado = True
+            except Exception as reopen_exc:
+                print(
+                    f"[!] Deal {deal_id}: falha ao reabrir card após erro: {reopen_exc}",
+                    flush=True,
+                )
 
     if not algum_processado:
         partes = []
-        if n_sem_won:
-            partes.append(f"{n_sem_won} sem won_time")
+        if n_sem_evento:
+            partes.append(f"{n_sem_evento} sem update_time")
         if n_legado:
             partes.append(f"{n_legado} bloqueado(s) no arquivo (id só)")
         if n_dup:
-            partes.append(f"{n_dup} ganho(s) já processados (id|won_time)")
+            partes.append(f"{n_dup} deal(s) já processados (deals_processed)")
         if n_data:
-            partes.append(f"{n_data} won_time inválido")
+            partes.append(f"{n_data} update_time inválido")
         if n_corte:
             partes.append(f"{n_corte} antes do corte temporal")
         if partes:
@@ -1257,15 +1451,15 @@ def processar_contratos_assinados():
             if result.get("status") in ("approved", "skipped"):
                 marcar_pedidos_aprovados(deal_id)
                 try:
-                    if garantir_deal_em_etapa_contrato({"id": deal_id}):
-                        print(
-                            f"[*] Pipedrive: deal {deal_id} movido para etapa Contrato.",
-                            flush=True,
-                        )
+                    marcar_deal_como_ganho(deal_id)
+                    print(
+                        f"[*] Pipedrive: deal {deal_id} marcado como ganho "
+                        f"(após assinatura completa).",
+                        flush=True,
+                    )
                 except Exception as exc:
                     print(
-                        f"[!] Pipedrive: falha ao mover deal {deal_id} "
-                        f"para etapa Contrato: {exc}",
+                        f"[!] Pipedrive: falha ao marcar deal {deal_id} como ganho: {exc}",
                         flush=True,
                     )
                 from core.hub_pedido import tentar_criar_pedido_hub_deal
@@ -1296,6 +1490,13 @@ def processar_contratos_assinados():
                 f"[!] Plune: falha ao aprovar pedidos (deal {deal_id}): {exc}",
                 flush=True,
             )
+            try:
+                _reabrir_deal_apos_falha(deal_id, f"Plune (pós-assinatura): {exc}")
+            except Exception as reopen_exc:
+                print(
+                    f"[!] Deal {deal_id}: falha ao reabrir card após erro Plune: {reopen_exc}",
+                    flush=True,
+                )
 
 
 def main():
@@ -1317,7 +1518,7 @@ def main():
         f"(deals, pedidos Plune, envelopes; legado txt/json migrado na 1ª execução)."
     )
     print(
-        f"[*] Corte temporal: won_time a partir de "
+        f"[*] Corte temporal: update_time a partir de "
         f"{formatar_data_hora_brasilia(DATA_INICIO_SCRIPT)} (Brasília), "
         f"com margem de {CORTE_TEMPORAL_GRACE_MINUTOS} min antes do arranque."
     )
@@ -1329,9 +1530,14 @@ def main():
         print(
             "[*] DEV_PULAR_CLICKSIGN=1 — a API Clicksign não é chamada (só gera o .docx no disco; use com TESTE_PLUNE_SEM_ASSINATURA em dev para ir ao Plune)."
         )
-    if DEV_HUB_SEM_APROVACAO_PLUNE:
+    if PULAR_HUB:
         print(
-            "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune no ganho "
+            "[*] PULAR_HUB=1 — criação de pedido no HUB desligada "
+            "(atualizações e validações HUB continuam)."
+        )
+    elif DEV_HUB_SEM_APROVACAO_PLUNE:
+        print(
+            "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune na etapa Contrato "
             "(sem esperar aprovação Plune pós-assinatura)."
         )
     print(

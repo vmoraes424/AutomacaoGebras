@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.automacao_contrato import ClicksignClient
+from core.automacao_contrato import ClicksignClient, _retomar_fluxo_interrompido
 
 
 @pytest.fixture
@@ -74,6 +74,21 @@ class TestImportsModuloPrincipal:
         import core.automacao_contrato  # noqa: F401
         import core.plune_pedido  # noqa: F401
         import core.pedido_anexos  # noqa: F401
+
+
+class TestRetomarFluxoInterrompido:
+    def test_retoma_quando_ha_envelope_pendente(self):
+        assert _retomar_fluxo_interrompido(
+            {"envelope_id": "9091c56e-f326-457f-a762-41a3be90db44"}
+        )
+
+    def test_retoma_dev_sem_clicksign(self):
+        assert _retomar_fluxo_interrompido(
+            {"envelope_id": "sem-envelope-746", "pedidos_plune_criados": 1}
+        )
+
+    def test_nao_retoma_primeira_vez(self):
+        assert not _retomar_fluxo_interrompido(None)
 
 
 class TestCancelEnvelope:

@@ -8,8 +8,8 @@ from .config import PIPEDRIVE_API_TOKEN
 from .database import default_branch_id, resolve_filial_branch
 
 # --- Hashes dos custom fields (Pipedrive) ---
-FIELD_NUMERO_CONTRATO_P1 = "14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b"
-FIELD_NUMERO_CONTRATO_P2 = "41a3157128d51e2fc803eeec4b242efafcb55b4e"
+FIELD_NOTAS = "14720dca0fd36e1e5b47f8d3d71f3f3868b0df9b"
+FIELD_CODIGO_CLIENTE_INSTALACAO = "41a3157128d51e2fc803eeec4b242efafcb55b4e"
 FIELD_NOME_CLIENTE = "28d491e0263008b437e28fc55bbad8302c4646c8"
 FIELD_ENDERECO = "81566ac6e038bb0ba3adfa122c798b3e497b7538"
 FIELD_CEP = "6d3373f7ee86c7d2449824136baf3ee1938a8ef1"
@@ -39,6 +39,7 @@ CAMPOS_SERVICO_UC = (
     FIELD_GESTAO_ACL,
     FIELD_GESTAO_USINA_FOTOVOLTAICA,
 )
+# Removido do Pipedrive (jun/2026); mantido para deals antigos e contrato Word
 FIELD_CONTATO_GESTOR = "ecb0e3a2cb2dbbc8c0caf9e695930f594406c80b"
 FIELD_CONTATO_FINANCEIRO = "722da69afe31c1f8fa4f5457a223e2a952ae0978"
 FIELD_CONTATO_CONTRATANTE = "3002b2df87f0577585ebaec394fd09a38ca8778f"
@@ -48,6 +49,7 @@ FIELD_SUBCENTRO_NIVEL_3 = "60ffe8e9c2aa51f717865559e86e6044bfb335e6"
 FIELD_EMAIL_CONSULTOR_GEBRAS = "3bacd163054a20c843e79bc525bebc1285773b17"
 FIELD_EMAIL_COORDENADOR_GEBRAS = "3a5c1d1dc1b5f023f57c65b9bf725c27d754d31b"
 FIELD_EMAIL_DIRETOR_GEBRAS = "a2eba4ca348f3597d570d84c356aa66e81d762cd"
+# Removidos do Pipedrive (jun/2026); fallback em SIGNER_FIELDS para deals antigos
 FIELD_EMAIL_COORDENADOR_LEGADO = "92359b129485b08fd024b8c28ef022e7635419a3"
 FIELD_EMAIL_DIRETOR_LEGADO = "35cc64cc4f30bc9df0a919cc61b42f69a2b4f1c2"
 FIELD_FILIAL = "be20f11317ac66845bf97695f43e57795e26d01d"
@@ -55,12 +57,26 @@ FIELD_INSCRICAO_ESTADUAL = "c3e623cfa197040b778400a8977ae2c8a8386024"
 FIELD_PERCENTUAL_EXITO = "225005fe8384d97183e5480781ea8ea82982301e"
 FIELD_OBSERVACOES_DETALHES = "4fba2f9323c64acdcac770e38f2c0cdb840796bc"
 
-# Grupo 1: Consultor. Comercial recebe e-mail informativo separado (aviso_comercial).
+# Ordem Clicksign: Consultor → Coordenador → Cliente → Diretor.
+# papel = rótulo nos logs; nome_clicksign = name na API (2+ palavras).
+# Grupo 1 Consultor; comercial recebe e-mail informativo separado (aviso_comercial).
 SIGNER_FIELDS = [
-    ("Consultor", FIELD_EMAIL_CONSULTOR_GEBRAS, 1, FIELD_CONTATO_GESTOR),
-    ("Coordenador", FIELD_EMAIL_COORDENADOR_GEBRAS, 2, FIELD_EMAIL_COORDENADOR_LEGADO),
-    ("Cliente", FIELD_CONTATO_PRINCIPAL, 3, None),
-    ("Diretor", FIELD_EMAIL_DIRETOR_GEBRAS, 4, FIELD_EMAIL_DIRETOR_LEGADO),
+    ("Consultor", "Gestor Gebras", FIELD_EMAIL_CONSULTOR_GEBRAS, 1, FIELD_CONTATO_GESTOR),
+    (
+        "Coordenador",
+        "Coordenador Principal",
+        FIELD_EMAIL_COORDENADOR_GEBRAS,
+        2,
+        FIELD_EMAIL_COORDENADOR_LEGADO,
+    ),
+    ("Cliente", "Contato Principal", FIELD_CONTATO_PRINCIPAL, 3, None),
+    (
+        "Diretor",
+        "Diretor Principal",
+        FIELD_EMAIL_DIRETOR_GEBRAS,
+        4,
+        FIELD_EMAIL_DIRETOR_LEGADO,
+    ),
 ]
 
 # Seção Contrato no Pipedrive: obrigatórios para automação, exceto CAMPOS_CONTRATO_OPCIONAIS
@@ -69,15 +85,15 @@ CAMPOS_CONTRATO_OPCIONAIS = frozenset({FIELD_OBSERVACOES_DETALHES})
 # (rótulo no Pipedrive, hash, tipo) — text | enum | email | cep | uc | money_mensal | date | documento
 CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
     ("Filial", FIELD_FILIAL, "enum"),
-    ("Dados da Contratante", FIELD_NOME_CLIENTE, "text"),
+    ("Contratante", FIELD_NOME_CLIENTE, "text"),
     ("Endereço", FIELD_ENDERECO, "text"),
     ("CEP", FIELD_CEP, "cep"),
     ("Município/Estado", FIELD_CIDADE, "text"),
     ("CPF/CNPJ", FIELD_DOCUMENTO, "documento"),
     ("Inscrição Estadual", FIELD_INSCRICAO_ESTADUAL, "text"),
     ("Inscrição Municipal", FIELD_INSCRICAO_MUNICIPAL, "text"),
-    ("Código da Instalação", FIELD_NUMERO_CONTRATO_P1, "text"),
-    ("Código Cliente", FIELD_NUMERO_CONTRATO_P2, "text"),
+    ("Notas", FIELD_NOTAS, "text"),
+    ("Código Cliente/Código da Instalação", FIELD_CODIGO_CLIENTE_INSTALACAO, "text"),
     ("SOLE Web", FIELD_QTD_SOLE, "uc"),
     ("Sole Consultoria", FIELD_QUALIDADE_ENERGIA, "uc"),
     ("Gestão ACL - Mercado Livre de Energia", FIELD_GESTAO_ACL, "uc"),
@@ -97,15 +113,12 @@ CAMPOS_CONTRATO_OBRIGATORIOS: tuple[tuple[str, str, str], ...] = (
         "date",
     ),
     ("Porcentagem de Exito", FIELD_PERCENTUAL_EXITO, "enum"),
-    ("Sub Centro Nível 2", FIELD_REGIONAL, "enum"),
-    ("Sub Centro Nível 3", FIELD_SUBCENTRO_NIVEL_3, "enum"),
-    ("E-mail Coordenador", FIELD_EMAIL_COORDENADOR_LEGADO, "email"),
+    ("Regional", FIELD_REGIONAL, "enum"),
+    ("Consultor", FIELD_SUBCENTRO_NIVEL_3, "enum"),
     ("E-mail Assinante do Contrato", FIELD_CONTATO_PRINCIPAL, "email"),
     ("E-mail Consultor GEBRAS", FIELD_EMAIL_CONSULTOR_GEBRAS, "email"),
     ("E-mail Coordenador GEBRAS", FIELD_EMAIL_COORDENADOR_GEBRAS, "email"),
-    ("E-mail Gestor GEBRAS", FIELD_CONTATO_GESTOR, "email"),
     ("E-mail Diretor GEBRAS", FIELD_EMAIL_DIRETOR_GEBRAS, "email"),
-    ("E-mail Diretor", FIELD_EMAIL_DIRETOR_LEGADO, "email"),
     ("Email Financeiro Contratante", FIELD_CONTATO_FINANCEIRO, "email"),
     ("E-mail Gestor Contratante", FIELD_CONTATO_CONTRATANTE, "email"),
 )
@@ -115,12 +128,50 @@ def get_custom_fields(deal_data: dict) -> dict:
     return deal_data.get("custom_fields") or {}
 
 
+def _rotulos_opcao_campo(deal_data: dict, field_code: str, raw) -> list[str]:
+    """Resolve ids de enum/set (API v2 devolve listas como [91]) para rótulos."""
+    rotulos: list[str] = []
+    vistos: set[str] = set()
+    opcoes = _enum_option_labels_for_field(field_code)
+
+    for opt_id in _ids_opcao_campo(raw):
+        rotulo = opcoes.get(opt_id, opt_id).strip()
+        if not rotulo or rotulo in vistos:
+            continue
+        vistos.add(rotulo)
+        rotulos.append(rotulo)
+
+    if rotulos:
+        return rotulos
+
+    if isinstance(raw, dict):
+        for chave in ("label", "name", "value"):
+            texto = str(raw.get(chave) or "").strip()
+            if texto:
+                return [texto]
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    return []
+
+
 def get_val(deal_data: dict, code: str) -> str:
     cf = get_custom_fields(deal_data)
     v = cf.get(code)
+    if v is None or v == "":
+        v = deal_data.get(code)
     if isinstance(v, dict):
-        return str(v.get("value", ""))
-    return str(v) if v is not None else ""
+        return str(v.get("value", v.get("label", "")))
+    if isinstance(v, list):
+        rotulos = _rotulos_opcao_campo(deal_data, code, v)
+        return ", ".join(rotulos)
+    if v is not None and v != "":
+        texto = str(v).strip()
+        if "@" not in texto:
+            rotulo = _enum_option_labels_for_field(code).get(texto, "")
+            if rotulo:
+                return rotulo
+        return texto
+    return ""
 
 
 _enum_option_labels: dict[str, dict[str, str]] | None = None
@@ -263,28 +314,87 @@ def sufixo_ano_contrato_gebras(*, ano: int | None = None) -> str:
     return f"n1r0a{ano % 100:02d}"
 
 
-def _primeiro_codigo_instalacao_p1(p1_raw: str) -> str:
-    """Primeiro código do P1 (vírgula/; / espaço); usado no número do contrato."""
-    for parte in re.split(r"[,;\s]+", (p1_raw or "").strip()):
-        texto = parte.strip()
-        if texto:
-            return texto
+def _primeira_instalacao_codigo_contrato(raw: str) -> str:
+    """Primeira instalação após «/» no campo combinado (texto original, ex.: 00665)."""
+    texto = (raw or "").strip()
+    if "/" not in texto:
+        return ""
+    parte_instalacoes = texto.split("/", 1)[1]
+    for parte in re.split(r"[,;\s]+", parte_instalacoes):
+        pedaco = parte.strip()
+        if pedaco:
+            return pedaco
     return ""
 
 
+def _codigo_cliente_contrato(raw: str) -> str:
+    texto = (raw or "").strip()
+    if not texto:
+        return ""
+    return texto.split("/", 1)[0].strip()
+
+
+def parse_codigo_cliente_instalacao(raw: str) -> tuple[int, list[int]]:
+    """
+    Campo «Código Cliente/Código da Instalação»:
+    - «352» → cliente 352 (sem instalações; HUB exige «/» após o cliente)
+    - «352/1234» → cliente 352, instalações [1234]
+    - «352/1234,5678» → cliente 352, instalações [1234, 5678]
+    """
+    texto = (raw or "").strip()
+    if not texto:
+        raise ValueError(
+            "Código Cliente/Código da Instalação ausente. "
+            "Informe «codigo_cliente» ou «codigo_cliente/instalacao1,instalacao2»."
+        )
+
+    def _parse_inteiro(valor: str, rotulo: str) -> int:
+        try:
+            return int(valor.strip())
+        except ValueError as exc:
+            raise ValueError(
+                f"Código Cliente/Código da Instalação inválido: {rotulo} "
+                f"deve ser numérico. Valor recebido: {valor!r}."
+            ) from exc
+
+    def _parse_instalacoes(parte: str) -> list[int]:
+        codigos: list[int] = []
+        vistos: set[int] = set()
+        for item in re.split(r"[,;\s]+", parte.strip()):
+            pedaco = item.strip()
+            if not pedaco:
+                continue
+            codigo = _parse_inteiro(pedaco, "instalação")
+            if codigo not in vistos:
+                vistos.add(codigo)
+                codigos.append(codigo)
+        return codigos
+
+    if "/" in texto:
+        parte_cliente, parte_instalacoes = texto.split("/", 1)
+        if not parte_cliente.strip():
+            raise ValueError(
+                "Código Cliente/Código da Instalação inválido: informe o código "
+                f"do cliente antes de «/». Valor recebido: {texto!r}."
+            )
+        codigo_cliente = _parse_inteiro(parte_cliente, "código do cliente")
+        return codigo_cliente, _parse_instalacoes(parte_instalacoes)
+
+    return _parse_inteiro(texto.split(",")[0], "código do cliente"), []
+
+
 def get_numero_contrato(deal_data: dict) -> str:
-    """Monta o identificador do contrato; sem códigos HUB usa o deal_id."""
-    p1 = _primeiro_codigo_instalacao_p1(
-        get_val(deal_data, FIELD_NUMERO_CONTRATO_P1)
-    )
-    p2 = get_val(deal_data, FIELD_NUMERO_CONTRATO_P2).strip()
+    """Monta CGRc{1ª instalação}i{cliente}n1r0a{AA}; instalação vem do campo cliente/instalação."""
+    codigo_cliente_raw = get_val(deal_data, FIELD_CODIGO_CLIENTE_INSTALACAO).strip()
+    primeira_instalacao = _primeira_instalacao_codigo_contrato(codigo_cliente_raw)
+    codigo_cliente = _codigo_cliente_contrato(codigo_cliente_raw)
     sufixo = sufixo_ano_contrato_gebras()
-    if p1 and p2:
-        return f"CGRc{p1}i{p2}{sufixo}"
+    if primeira_instalacao and codigo_cliente:
+        return f"CGRc{primeira_instalacao}i{codigo_cliente}{sufixo}"
     deal_id = str(deal_data.get("id", "")).strip() or "0"
-    p1 = p1 or deal_id
-    p2 = p2 or deal_id
-    return f"CGRc{p1}i{p2}{sufixo}"
+    primeira_instalacao = primeira_instalacao or deal_id
+    codigo_cliente = codigo_cliente or deal_id
+    return f"CGRc{primeira_instalacao}i{codigo_cliente}{sufixo}"
 
 
 def normalizar_documento(documento: str) -> str:
@@ -374,17 +484,52 @@ def extrair_signatarios(deal_data: dict) -> list:
     sign_sequence: list[dict] = []
     emails_vistos: set[str] = set()
 
-    for nome_cargo, chave, grupo, chave_legado in SIGNER_FIELDS:
-        email = _email_signatario_deal(deal_data, chave, chave_legado)
-        email = (email or "").strip()
-        if not email:
-            continue
-        chave_email = email.casefold()
-        if chave_email in emails_vistos:
-            continue
-        emails_vistos.add(chave_email)
-        sign_sequence.append({"name": nome_cargo, "email": email, "group": grupo})
+    for papel, nome_clicksign, chave, grupo, chave_legado in SIGNER_FIELDS:
+        emails = _emails_signatario_deal(deal_data, chave, chave_legado)
+        for indice, email in enumerate(emails):
+            chave_email = email.casefold()
+            if chave_email in emails_vistos:
+                continue
+            emails_vistos.add(chave_email)
+            nome = nome_clicksign if indice == 0 else f"{nome_clicksign} {indice + 1}"
+            papel_log = papel if indice == 0 else f"{papel} {indice + 1}"
+            sign_sequence.append(
+                {
+                    "papel": papel_log,
+                    "name": nome,
+                    "email": email,
+                    "group": grupo,
+                }
+            )
     return sign_sequence
+
+
+def signatarios_omitidos_por_email_duplicado(
+    deal_data: dict, sign_sequence: list[dict]
+) -> list[dict]:
+    """Papéis com e-mail preenchido no deal, mas omitidos por deduplicação de e-mail."""
+    emails_ativos = {s["email"].casefold() for s in sign_sequence}
+    papeis_ativos = {s.get("papel", "") for s in sign_sequence}
+    omitidos: list[dict] = []
+
+    for papel, _nome_clicksign, chave, grupo, chave_legado in SIGNER_FIELDS:
+        emails = _emails_signatario_deal(deal_data, chave, chave_legado)
+        if not emails:
+            continue
+        email = emails[0]
+        if email.casefold() not in emails_ativos:
+            continue
+        if papel in papeis_ativos or any(p.startswith(f"{papel} ") for p in papeis_ativos):
+            continue
+        omitidos.append(
+            {
+                "papel": papel,
+                "email": email,
+                "group": grupo,
+                "motivo": "e-mail duplicado (já usado em outro papel)",
+            }
+        )
+    return omitidos
 
 
 def _ids_opcao_campo(raw) -> list[str]:
@@ -406,33 +551,102 @@ def _ids_opcao_campo(raw) -> list[str]:
     return [str(raw).strip()]
 
 
-def _email_signatario_deal(
+def _emails_signatario_deal(
     deal_data: dict, field_code: str, field_legado: str | None
-) -> str:
+) -> list[str]:
     for code in (field_code, field_legado):
         if not code:
             continue
-        email = _email_de_hash_signatario(deal_data, code)
-        if email:
-            return email
-    return ""
+        emails = _emails_de_hash_signatario(deal_data, code)
+        if emails:
+            return emails
+    return []
 
 
-def _email_de_hash_signatario(deal_data: dict, field_code: str) -> str:
+def _email_signatario_deal(
+    deal_data: dict, field_code: str, field_legado: str | None
+) -> str:
+    emails = _emails_signatario_deal(deal_data, field_code, field_legado)
+    return emails[0] if emails else ""
+
+
+def _emails_de_hash_signatario(deal_data: dict, field_code: str) -> list[str]:
+    """Resolve um ou mais e-mails (campo set do Pipedrive aceita múltiplas opções)."""
     cf = get_custom_fields(deal_data)
     raw = cf.get(field_code)
     if raw is None or raw == "":
         raw = deal_data.get(field_code)
     if raw is None or raw == "":
-        return ""
+        return []
 
-    if isinstance(raw, str) and "@" in raw:
-        return raw.strip()
+    encontrados: list[str] = []
+    vistos: set[str] = set()
+
+    def _adicionar(valor: str) -> None:
+        for parte in re.split(r"[,;]+", str(valor or "")):
+            email = parte.strip()
+            if not email or "@" not in email:
+                continue
+            chave = email.casefold()
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            encontrados.append(email)
+
+    if isinstance(raw, str):
+        _adicionar(raw)
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                for chave in ("label", "name", "value", "email"):
+                    texto = str(item.get(chave) or "").strip()
+                    if "@" in texto:
+                        _adicionar(texto)
+                        break
+                else:
+                    val = item.get("id") or item.get("value")
+                    if val is not None:
+                        label = _enum_option_labels_for_field(field_code).get(
+                            str(val), ""
+                        ).strip()
+                        if label:
+                            _adicionar(label)
+            elif isinstance(item, str):
+                if "@" in item:
+                    _adicionar(item)
+                else:
+                    label = _enum_option_labels_for_field(field_code).get(
+                        item.strip(), ""
+                    ).strip()
+                    if label:
+                        _adicionar(label)
+            elif item not in (None, ""):
+                label = _enum_option_labels_for_field(field_code).get(
+                    str(item).strip(), ""
+                ).strip()
+                if label:
+                    _adicionar(label)
 
     for opt_id in _ids_opcao_campo(raw):
         label = _enum_option_labels_for_field(field_code).get(opt_id, "").strip()
-        if label and "@" in label:
-            return label
+        if label:
+            _adicionar(label)
 
-    texto = get_val(deal_data, field_code).strip()
-    return texto if "@" in texto else ""
+    if not encontrados:
+        texto = get_val(deal_data, field_code).strip()
+        if texto:
+            _adicionar(texto)
+
+    return encontrados
+
+
+def get_contato_gestor_contrato(deal_data: dict) -> str:
+    """
+    E-mail do consultor Gebras na cláusula 10.5 do contrato.
+
+    O template traz ``gpo@gebras.com; {{ contato_gestor }}`` — este valor é só
+    o consultor (campo «E-mail Consultor GEBRAS»), com fallback no hash legado.
+    """
+    return _email_signatario_deal(
+        deal_data, FIELD_EMAIL_CONSULTOR_GEBRAS, FIELD_CONTATO_GESTOR
+    )

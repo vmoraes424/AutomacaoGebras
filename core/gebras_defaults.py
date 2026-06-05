@@ -24,7 +24,7 @@ PLUNE_TIPO_CONTRATO_MERCADO_LIVRE_RECORRENTE_ID = "41"  # MERCADO LIVRE DE ENERG
 PLUNE_TIPO_CONTRATO_SOLE_RECORRENTE_ID = "4"  # SOLE recorrente (SOLE Web / Sole Consultoria)
 PLUNE_CENTRO_CUSTO_ID = "5"
 PLUNE_PRODUTO_SOLE_ID = "5584"
-PLUNE_PARCEIRO_TIPO = "cliente"
+PLUNE_PARCEIRO_TIPO = "fornecedor"
 PLUNE_STATUS_PEDIDO_IMPLANTACAO_ID = "31"
 PLUNE_STATUS_PEDIDO_RECORRENTE_ID = "33"
 PLUNE_FRETE_POR_CONTA = "9"
@@ -42,8 +42,8 @@ PIPEDRIVE_STAGE_NEGOCIACAO_NOME = "Negociação"
 PIPEDRIVE_STAGE_CONTRATO_NOME = "Contrato"
 
 # --- Automação (paths e polling) ---
-INTERVALO_POLLING_SEGUNDOS = 30
-# Margem antes do arranque: ganhos nesse intervalo ainda entram no corte (evita perder deal ganho segundos antes do script subir)
+INTERVALO_POLLING_SEGUNDOS = 5
+# Margem antes do arranque: deals na etapa Contrato nesse intervalo ainda entram no corte
 CORTE_TEMPORAL_GRACE_MINUTOS = 5
 MODELO_DOCX = "contrato_padrao.docx"
 PASTA_SAIDA = "contratos"
@@ -54,4 +54,4 @@ CLICKSIGN_BASE_URL = "https://app.clicksign.com/api/v3"
 CLICKSIGN_RATE_LIMIT_MAX_RETRIES = 12
 CLICKSIGN_RATE_LIMIT_BUFFER_SEC = 1
 # Aviso da automação (grupo 1, paralelo ao Consultor) — não vem do Pipedrive
-EMAIL_COMERCIAL_AUTOMACAO = "comercial@gebras.com"
+EMAIL_COMERCIAL_AUTOMACAO = "pedro.terra@gebras.com"

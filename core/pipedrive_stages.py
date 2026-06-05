@@ -1,4 +1,4 @@
-"""Etapas do funil Pipedrive (Negociação no ganho; Contrato pós-assinatura)."""
+"""Etapas do funil Pipedrive (Contrato dispara automação; ganho pós-assinatura)."""
 
 from __future__ import annotations
 
@@ -81,6 +81,17 @@ def deal_esta_em_negociacao(deal: dict[str, Any]) -> bool:
     return int(stage_id_atual) == stage_id_negociacao(pipeline_id)
 
 
+def deal_esta_em_etapa_contrato(deal: dict[str, Any]) -> bool:
+    pipeline_id = deal.get("pipeline_id")
+    stage_id_atual = deal.get("stage_id")
+    if pipeline_id is None or stage_id_atual is None:
+        return False
+    try:
+        return int(stage_id_atual) == stage_id_contrato(pipeline_id)
+    except RuntimeError:
+        return False
+
+
 def _buscar_deal_v2(deal_id: str) -> dict[str, Any]:
     response = requests.get(
         f"https://api.pipedrive.com/api/v2/deals/{deal_id}",
@@ -148,10 +159,36 @@ def _garantir_deal_em_etapa(deal: dict[str, Any], nome_etapa: str) -> bool:
 
 
 def garantir_deal_em_etapa_negociacao(deal: dict[str, Any]) -> bool:
-    """Garante etapa Negociação (ao marcar deal como ganho)."""
+    """Garante etapa Negociação (ex.: reverter após falha de validação)."""
     return _garantir_deal_em_etapa(deal, PIPEDRIVE_STAGE_NEGOCIACAO_NOME)
 
 
 def garantir_deal_em_etapa_contrato(deal: dict[str, Any]) -> bool:
-    """Garante etapa Contrato (após última assinatura e aprovação Plune)."""
+    """Garante etapa Contrato (legado; fluxo atual dispara ao entrar em Contrato)."""
     return _garantir_deal_em_etapa(deal, PIPEDRIVE_STAGE_CONTRATO_NOME)
+
+
+def reverter_deal_para_negociacao(deal_id: str) -> bool:
+    """Move o deal para Negociação (evita reprocessar enquanto corrige o card)."""
+    deal = _buscar_deal_v2(deal_id)
+    return garantir_deal_em_etapa_negociacao(deal)
+
+
+def marcar_deal_como_ganho(deal_id: str) -> None:
+    """Marca o deal como ganho após todas as assinaturas Clicksign."""
+    response = requests.patch(
+        f"https://api.pipedrive.com/api/v2/deals/{deal_id}",
+        headers=_headers(),
+        json={"status": "won"},
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Pipedrive PATCH deal won -> {response.status_code}: {response.text[:500]}"
+        )
+    data = response.json().get("data") or {}
+    if data.get("status") != "won":
+        raise RuntimeError(
+            f"Pipedrive não confirmou status=won para deal {deal_id}; "
+            f"status retornado={data.get('status')!r}"
+        )

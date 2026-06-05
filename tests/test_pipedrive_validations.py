@@ -12,8 +12,8 @@ from core.pipedrive_fields import (
     FIELD_CEP,
     FIELD_DATA_PAGAMENTO_IMPLANTACAO,
     FIELD_INSCRICAO_MUNICIPAL,
-    FIELD_NUMERO_CONTRATO_P1,
-    FIELD_NUMERO_CONTRATO_P2,
+    FIELD_CODIGO_CLIENTE_INSTALACAO,
+    FIELD_NOTAS,
     FIELD_OBSERVACOES_DETALHES,
     FIELD_QUANTIDADE_UCS,
     FIELD_VALOR_IMPLANTACAO,
@@ -23,6 +23,8 @@ from core.pipedrive_validations import (
     DealValidationError,
     _implantacao_exige_data_pagamento,
     _validar_campo_contrato,
+    notificar_validacao_aprovada,
+    reabrir_deal_falha_automacao,
     validar_deal_para_automacao,
 )
 
@@ -121,10 +123,10 @@ def test_data_pagamento_implantacao_exigida_quando_valor_maior_que_1():
 
 def test_codigos_hub_sao_obrigatorios():
     obrigatorios = {row[1] for row in CAMPOS_CONTRATO_OBRIGATORIOS}
-    assert FIELD_NUMERO_CONTRATO_P1 in obrigatorios
-    assert FIELD_NUMERO_CONTRATO_P2 in obrigatorios
-    assert FIELD_NUMERO_CONTRATO_P1 not in CAMPOS_CONTRATO_OPCIONAIS
-    assert FIELD_NUMERO_CONTRATO_P2 not in CAMPOS_CONTRATO_OPCIONAIS
+    assert FIELD_NOTAS in obrigatorios
+    assert FIELD_CODIGO_CLIENTE_INSTALACAO in obrigatorios
+    assert FIELD_NOTAS not in CAMPOS_CONTRATO_OPCIONAIS
+    assert FIELD_CODIGO_CLIENTE_INSTALACAO not in CAMPOS_CONTRATO_OPCIONAIS
 
 
 def test_quantidade_ucs_e_obrigatoria():
@@ -184,8 +186,7 @@ def test_get_numero_contrato_com_codigos_hub():
     deal = {
         "id": 746,
         "custom_fields": {
-            FIELD_NUMERO_CONTRATO_P1: "123",
-            FIELD_NUMERO_CONTRATO_P2: "456",
+            FIELD_CODIGO_CLIENTE_INSTALACAO: "456/123",
         },
     }
     assert get_numero_contrato(deal) == "CGRc123i456n1r0a26"
@@ -249,3 +250,32 @@ def test_validar_deal_com_proposta_comercial_nao_erro_so_por_anexo(
         validar_deal_para_automacao(deal_minimo)
 
     assert not any("Proposta Comercial" in msg for msg in exc.value.mensagens)
+
+
+@patch("core.pipedrive_validations.reabrir_deal")
+@patch("core.pipedrive_validations.criar_nota_deal")
+@patch("core.pipedrive_stages.reverter_deal_para_negociacao")
+def test_reabrir_deal_falha_automacao_reverte_para_negociacao(
+    mock_reverter, mock_nota, mock_reabrir
+):
+    reabrir_deal_falha_automacao("746", ["Plune: CNPJ duplicado"])
+    mock_nota.assert_called_once()
+    assert "Plune" in mock_nota.call_args[0][1]
+    mock_reverter.assert_called_once_with("746")
+    mock_reabrir.assert_called_once_with("746")
+
+
+@patch("core.pipedrive_validations._deal_ja_tem_nota_validacao_ok", return_value=False)
+@patch("core.pipedrive_validations.criar_nota_deal")
+def test_notificar_validacao_aprovada_cria_anotacao(mock_nota, _mock_ja_tem):
+    assert notificar_validacao_aprovada("746") is True
+    mock_nota.assert_called_once_with("746", mock_nota.call_args[0][1])
+    assert "validação" in mock_nota.call_args[0][1].lower()
+    assert "concluída com sucesso" in mock_nota.call_args[0][1].lower()
+
+
+@patch("core.pipedrive_validations._deal_ja_tem_nota_validacao_ok", return_value=True)
+@patch("core.pipedrive_validations.criar_nota_deal")
+def test_notificar_validacao_aprovada_nao_duplica(mock_nota, _mock_ja_tem):
+    assert notificar_validacao_aprovada("746") is False
+    mock_nota.assert_not_called()

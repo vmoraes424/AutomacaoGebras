@@ -18,6 +18,7 @@ from .pipedrive_fields import (
     get_filial_chaves,
     get_filial_label,
     get_val,
+    _emails_de_hash_signatario,
     normalizar_cep,
     resolver_branch_id,
     settings_por_branch,
@@ -110,11 +111,17 @@ def _validar_campo_contrato(deal: dict, label: str, field_code: str, tipo: str) 
         return None
 
     if tipo == "email":
-        valor = get_val(deal, field_code).strip()
-        if not _email_valido(valor):
+        emails = _emails_de_hash_signatario(deal, field_code)
+        if not emails:
+            return (
+                f"Campo obrigatório ausente: {label}. "
+                f"Informe ao menos um e-mail na seção Contrato do deal."
+            )
+        invalidos = [e for e in emails if not _email_valido(e)]
+        if invalidos:
             return (
                 f"Campo obrigatório inválido: {label}. "
-                f"Informe um e-mail válido. Valor recebido: {valor!r}."
+                f"E-mail(s) inválido(s): {', '.join(invalidos)!r}."
             )
         return None
 
@@ -299,6 +306,44 @@ def criar_nota_deal(deal_id: str, texto: str) -> None:
         )
 
 
+_TEXTO_NOTA_VALIDACAO_OK = (
+    "<p><strong>Automação Gebras:</strong> validação da seção "
+    "<strong>Contrato</strong> concluída com sucesso. "
+    "Campos obrigatórios, Proposta Comercial e regras HUB estão OK. "
+    "A automação segue com Plune, geração do contrato e Clicksign.</p>"
+)
+
+_MARCADOR_NOTA_VALIDACAO_OK = "validação da seção contrato concluída com sucesso"
+
+
+def _deal_ja_tem_nota_validacao_ok(deal_id: str) -> bool:
+    """Evita duplicar a anotação de validação (ex.: update_time mudou após a 1ª nota)."""
+    response = requests.get(
+        "https://api.pipedrive.com/v1/notes",
+        params={"deal_id": int(deal_id), "limit": 100, "sort": "id DESC"},
+        headers=_pipedrive_headers(),
+        timeout=30,
+    )
+    if not response.ok:
+        return False
+    for nota in response.json().get("data") or []:
+        conteudo = str(nota.get("content") or "").lower()
+        if _MARCADOR_NOTA_VALIDACAO_OK in conteudo:
+            return True
+    return False
+
+
+def notificar_validacao_aprovada(deal_id: str) -> bool:
+    """
+    Anotação no deal quando a validação da seção Contrato é aceita.
+    Retorna True se criou a nota; False se já existia (idempotente).
+    """
+    if _deal_ja_tem_nota_validacao_ok(deal_id):
+        return False
+    criar_nota_deal(deal_id, _TEXTO_NOTA_VALIDACAO_OK)
+    return True
+
+
 def reabrir_deal(deal_id: str) -> None:
     response = requests.put(
         f"https://api.pipedrive.com/v1/deals/{deal_id}",
@@ -318,6 +363,14 @@ def reabrir_deal(deal_id: str) -> None:
         )
 
 
+def _executar_reabertura_deal(deal_id: str, nota: str) -> None:
+    from .pipedrive_stages import reverter_deal_para_negociacao
+
+    criar_nota_deal(deal_id, nota)
+    reverter_deal_para_negociacao(deal_id)
+    reabrir_deal(deal_id)
+
+
 def reabrir_deal_com_erros(deal_id: str, erros: list[str]) -> None:
     itens = "".join(f"<li>{erro}</li>" for erro in erros)
     nota = (
@@ -326,7 +379,20 @@ def reabrir_deal_com_erros(deal_id: str, erros: list[str]) -> None:
         "(exceto Observações), "
         "ou falta o anexo <strong>Proposta Comercial</strong>.</p>"
         f"<ul>{itens}</ul>"
-        "<p>Corrija os campos e marque o card como ganho novamente.</p>"
+        "<p>Corrija os campos e mova o card novamente para a etapa "
+        "<strong>Contrato</strong>.</p>"
     )
-    criar_nota_deal(deal_id, nota)
-    reabrir_deal(deal_id)
+    _executar_reabertura_deal(deal_id, nota)
+
+
+def reabrir_deal_falha_automacao(deal_id: str, erros: list[str]) -> None:
+    """Reverte para Negociação quando Plune, contrato, Clicksign ou outra etapa falha."""
+    itens = "".join(f"<li>{erro}</li>" for erro in erros)
+    nota = (
+        "<p><strong>Automação Gebras:</strong> o card foi reaberto porque a automação "
+        "falhou em uma das etapas (Plune, contrato, Clicksign, HUB, etc.).</p>"
+        f"<ul>{itens}</ul>"
+        "<p>Corrija o problema e mova o card novamente para a etapa "
+        "<strong>Contrato</strong>.</p>"
+    )
+    _executar_reabertura_deal(deal_id, nota)

@@ -1,4 +1,4 @@
-"""Testes: etapa Negociação no Pipedrive ao marcar deal como ganho."""
+"""Testes: etapas do funil Pipedrive (Contrato dispara; ganho pós-assinatura)."""
 
 from __future__ import annotations
 
@@ -138,3 +138,35 @@ def test_etapa_contrato_ausente_no_pipeline_levanta_erro(mock_get: MagicMock):
     deal = {"id": 600, "pipeline_id": 99, "stage_id": 1}
     with pytest.raises(RuntimeError, match=PIPEDRIVE_STAGE_CONTRATO_NOME):
         stages.garantir_deal_em_etapa_contrato(deal)
+
+
+@patch("core.pipedrive_stages.requests.get")
+def test_deal_esta_em_etapa_contrato(mock_get: MagicMock):
+    mock_get.return_value = MagicMock(
+        ok=True,
+        status_code=200,
+        json=lambda: {
+            "data": [
+                {"id": 6, "name": "Negociação"},
+                {"id": 7, "name": "Contrato"},
+            ]
+        },
+    )
+    assert stages.deal_esta_em_etapa_contrato(
+        {"id": 1, "pipeline_id": 1, "stage_id": 7}
+    )
+    assert not stages.deal_esta_em_etapa_contrato(
+        {"id": 2, "pipeline_id": 1, "stage_id": 6}
+    )
+
+
+@patch("core.pipedrive_stages.requests.patch")
+def test_marcar_deal_como_ganho(mock_patch: MagicMock):
+    mock_patch.return_value = MagicMock(
+        ok=True,
+        status_code=200,
+        json=lambda: {"data": {"id": 800, "status": "won"}},
+    )
+    stages.marcar_deal_como_ganho("800")
+    mock_patch.assert_called_once()
+    assert mock_patch.call_args.kwargs["json"] == {"status": "won"}
