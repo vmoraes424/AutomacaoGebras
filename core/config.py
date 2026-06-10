@@ -88,6 +88,8 @@ TESTE_PLUNE_SEM_ASSINATURA = _env_bool("TESTE_PLUNE_SEM_ASSINATURA", True)
 DEV_HUB_SEM_APROVACAO_PLUNE = _env_bool("DEV_HUB_SEM_APROVACAO_PLUNE", False)
 # true = não cria pedido no HUB (atualizações e validações continuam)
 PULAR_HUB = _env_bool("PULAR_HUB", False)
+# true = worker usa deal_forms (status validated+) para campos migrados; false = legado Pipe-only
+FORMULARIO_WEB_ENABLED = _env_bool("FORMULARIO_WEB_ENABLED", False)
 
 # --- Negócio (gebras_defaults) ---
 PLUNE_BASE_URL = G.PLUNE_BASE_URL

@@ -19,6 +19,9 @@ os.environ.setdefault("PLUNE_BASE_URL", "https://plune.test.example")
 os.environ.setdefault("PLUNE_AUTH_TOKEN", "pytest-plune-token")
 # .env local pode ter PULAR_HUB=true; testes de criação HUB precisam dela false
 os.environ["PULAR_HUB"] = "false"
+# Portal: testes usam repositório em memória (sem MySQL real)
+os.environ["PORTAL_DEAL_FORM_REPOSITORY"] = "memory"
+os.environ.setdefault("FORMULARIO_WEB_ENABLED", "true")
 
 # config.PLUNE_BRANCH_ID consulta MySQL no import de plune_pedido — mock antes de qualquer import core.*
 _FAKE_FILIAL = {
@@ -69,3 +72,25 @@ def parceiro_minimo() -> dict:
 @pytest.fixture
 def pdf_bytes() -> bytes:
     return b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+@pytest.fixture
+def form_payload_v1_minimo() -> dict:
+    return {
+        "schema_version": "v1",
+        "cliente": {"contratante": "Cliente Teste Ltda", "documento": "11222333000144"},
+        "servicos": {"sole_web": 1, "quantidade_ucs": 1},
+    }
+
+
+@pytest.fixture
+def deal_form_record_draft(form_payload_v1_minimo: dict) -> dict:
+    return {
+        "deal_id": 746,
+        "status": "draft",
+        "schema_version": "v1",
+        "payload": form_payload_v1_minimo,
+        "owner_user_id": 24587114,
+        "owner_name": "Consultor Teste",
+        "deal_title": "Biview",
+    }

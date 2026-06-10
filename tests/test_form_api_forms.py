@@ -1,0 +1,175 @@
+"""Testes: endpoints de formulário (store em memória)."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from portal.composition import reset_container
+from portal.main import create_app
+
+
+@pytest.fixture
+def client():
+    reset_container()
+    yield TestClient(create_app())
+    reset_container()
+
+
+@patch("core.form_pipe_sync.fetch_deal_for_form", return_value=None)
+def test_get_form_not_found(_mock_deal, client):
+    response = client.get("/forms/746")
+    assert response.status_code == 404
+
+
+@patch("core.form_pipe_sync.fetch_deal_for_form")
+def test_get_form_bootstraps_do_pipedrive(mock_buscar, client):
+    deal = json.loads(
+        (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "formulario_v1"
+            / "deal_pipe_g1.json"
+        ).read_text(encoding="utf-8")
+    )
+    mock_buscar.return_value = deal
+    response = client.get("/forms/999001")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deal_id"] == 999001
+    assert data["status"] == "draft"
+    assert data["payload"]["servicos"]["sole_web"] == 4
+
+
+@patch("core.form_pipe_sync.fetch_deal_for_form")
+def test_save_and_get_draft(mock_buscar, client):
+    mock_buscar.return_value = {"id": 746, "title": "Biview", "custom_fields": {}}
+    payload = {
+        "schema_version": "v1",
+        "cliente": {"contratante": "Teste Ltda"},
+    }
+    body = {
+        "payload": payload,
+        "owner_user_id": 24587114,
+        "owner_name": "Pedro",
+        "deal_title": "Biview",
+        "schema_version": "v1",
+    }
+    put = client.put("/forms/746/draft", json=body)
+    assert put.status_code == 200
+    saved = put.json()
+    assert saved["deal_id"] == 746
+    assert saved["status"] == "draft"
+    assert saved["payload"]["cliente"]["contratante"] == "Teste Ltda"
+    assert saved["owner_user_id"] == 24587114
+
+    get = client.get("/forms/746")
+    assert get.status_code == 200
+    assert get.json()["payload"] == payload
+
+    status = client.get("/forms/746/status")
+    assert status.status_code == 200
+    assert status.json()["status"] == "draft"
+    assert status.json()["schema_version"] == "v1"
+
+
+@patch("core.form_pipe_sync.fetch_deal_for_form")
+def test_update_draft_preserves_created_at(mock_buscar, client):
+    mock_buscar.return_value = {"id": 100, "title": "T", "custom_fields": {}}
+    client.put(
+        "/forms/100/draft",
+        json={"payload": {"a": 1}, "schema_version": "v1"},
+    )
+    first = client.get("/forms/100").json()
+    client.put(
+        "/forms/100/draft",
+        json={"payload": {"a": 2}, "schema_version": "v1"},
+    )
+    second = client.get("/forms/100").json()
+    assert second["payload"]["a"] == 2
+    assert second["created_at"] == first["created_at"]
+    assert second["updated_at"] != first["updated_at"]
+
+
+@patch("core.form_pipe_sync.push_form_to_pipedrive")
+def test_submit_incompleto_retorna_error_com_validation_errors(_sync, client):
+    body = {
+        "payload": {"cliente": {"contratante": "Enviado"}},
+        "schema_version": "v1",
+    }
+    response = client.post("/forms/746/submit", json=body)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "error"
+    assert data["validation_errors"]
+    assert data["submitted_at"] is None
+
+
+def test_submit_g1_validado(client):
+    import json
+    from pathlib import Path
+
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "formulario_v1"
+        / "form_payload_v1_g1.json"
+    )
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    body = {"payload": payload, "schema_version": "v1"}
+    from unittest.mock import patch
+
+    patches = [
+        patch("core.form_validation_v1.sincronizar_subcentros_de_pedidos"),
+        patch("core.form_validation_v1.resolver_subcentro", return_value="1"),
+        patch("core.pipedrive_validations.filial_tem_mapeamento", return_value=True),
+        patch("core.pipedrive_validations.resolver_branch_id", return_value="751"),
+        patch("core.form_pipe_sync.push_form_to_pipedrive"),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        response = client.post("/forms/746/submit", json=body)
+    finally:
+        for p in patches:
+            p.stop()
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "validated"
+    assert data["submitted_at"] is not None
+    assert not data.get("validation_errors")
+
+
+@patch("core.form_pipe_sync.push_form_to_pipedrive")
+def test_draft_after_submit_returns_409(_sync, client):
+    import json
+    from pathlib import Path
+    from unittest.mock import patch
+
+    fixture = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "formulario_v1"
+        / "form_payload_v1_g1.json"
+    )
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    body = {"payload": payload, "schema_version": "v1"}
+    patches = [
+        patch("core.form_validation_v1.sincronizar_subcentros_de_pedidos"),
+        patch("core.form_validation_v1.resolver_subcentro", return_value="1"),
+        patch("core.pipedrive_validations.filial_tem_mapeamento", return_value=True),
+        patch("core.pipedrive_validations.resolver_branch_id", return_value="751"),
+    ]
+    for p in patches:
+        p.start()
+    try:
+        client.post("/forms/800/submit", json=body)
+    finally:
+        for p in patches:
+            p.stop()
+    response = client.put("/forms/800/draft", json=body)
+    assert response.status_code == 409

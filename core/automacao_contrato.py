@@ -25,6 +25,7 @@ from core.config import (
     CLICKSIGN_RATE_LIMIT_BUFFER_SEC,
     CLICKSIGN_RATE_LIMIT_MAX_RETRIES,
     DEV_PULAR_CLICKSIGN,
+    FORMULARIO_WEB_ENABLED,
     INTERVALO_POLLING_SEGUNDOS,
     MODELO_DOCX,
     PASTA_SAIDA,
@@ -34,6 +35,7 @@ from core.config import (
     DEV_HUB_SEM_APROVACAO_PLUNE,
     PULAR_HUB,
 )
+from core.form_deal_adapter import preparar_deal_para_automacao
 from core.database import (
     carregar_deals_processados,
     garantir_envelope_para_hub,
@@ -1057,6 +1059,27 @@ def processar_deals_pendentes():
             flush=True,
         )
 
+        prep = preparar_deal_para_automacao(
+            deal, formulario_web_enabled=FORMULARIO_WEB_ENABLED
+        )
+        if prep.skipped_reason:
+            status_info = (
+                f" (status={prep.form_status})" if prep.form_status else ""
+            )
+            print(
+                f"[*] Deal {deal_id}: ignorado — {prep.skipped_reason}{status_info}. "
+                "Com FORMULARIO_WEB_ENABLED=true é necessário formulário validated no portal.",
+                flush=True,
+            )
+            continue
+
+        deal = prep.deal
+        if prep.uses_formulario_web:
+            print(
+                f"[*] Deal {deal_id}: usando payload do formulário web (merge form > Pipe).",
+                flush=True,
+            )
+
         try:
             # Idempotência: deal em deals_processed é ignorado no início do loop (poll).
             # Retomada: envelope_pending sem deals_processed (falha parcial / queda do processo).
@@ -1073,7 +1096,8 @@ def processar_deals_pendentes():
                 continue
 
             try:
-                validar_deal_para_automacao(deal)
+                if not (FORMULARIO_WEB_ENABLED and prep.uses_formulario_web):
+                    validar_deal_para_automacao(deal)
             except DealValidationError as validation_error:
                 print(
                     f"[!] Deal {deal_id}: validação falhou; reabrindo card no Pipedrive.",

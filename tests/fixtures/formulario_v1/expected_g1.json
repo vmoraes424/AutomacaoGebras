@@ -1,0 +1,15 @@
+{
+  "cenario": "G1",
+  "deal_id": 999001,
+  "numero_contrato_pattern": "CGRc665i352n1r0a",
+  "codigo_cliente": 352,
+  "instalacoes": [665, 1942],
+  "sole_web": "4",
+  "sole_consultoria": "2",
+  "gestao_acl": "6",
+  "quantidade_ucs": "12",
+  "signatarios_count": 4,
+  "signatarios_ordem": ["Consultor", "Coordenador", "Cliente", "Diretor"],
+  "hub_observacoes_obrigatorio": true,
+  "implantacao_exige_data": true
+}

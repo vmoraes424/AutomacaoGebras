@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from portal.composition import PortalContainer
+from portal.domain.crm.exceptions import CrmReadError
+from portal.interfaces.http.dependencies import container
+from portal.interfaces.http.schemas.pipedrive import PipedriveDealSummary, PipedriveUserOut
+
+router = APIRouter(prefix="/pipedrive", tags=["pipedrive"])
+
+
+@router.get("/users", response_model=list[PipedriveUserOut])
+def list_users(c: PortalContainer = Depends(container)) -> list[dict]:
+    try:
+        return [user.to_dict() for user in c.list_crm_users.execute()]
+    except CrmReadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/deals", response_model=list[PipedriveDealSummary])
+def list_deals(
+    owner_user_id: int | None = Query(default=None, description="ID do dono do card"),
+    c: PortalContainer = Depends(container),
+) -> list[dict]:
+    try:
+        return [
+            deal.to_dict()
+            for deal in c.list_deals_contrato.execute(owner_user_id=owner_user_id)
+        ]
+    except CrmReadError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

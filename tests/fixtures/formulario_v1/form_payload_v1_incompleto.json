@@ -1,0 +1,44 @@
+{
+  "schema_version": "v1",
+  "cliente": {
+    "contratante": "Incompleto Ltda",
+    "documento": "99888777000166",
+    "endereco": "",
+    "cep": "",
+    "municipio_estado": "",
+    "inscricao_estadual": "",
+    "inscricao_municipal": "",
+    "notas": "",
+    "codigo_cliente_instalacao": ""
+  },
+  "servicos": {
+    "sole_web": 0,
+    "sole_consultoria": 0,
+    "gestao_acl": 0,
+    "gestao_usina_fotovoltaica": 0,
+    "gestao_qualidade_energia": 0,
+    "quantidade_ucs": 0
+  },
+  "valores": {
+    "valor_recorrencia": "0",
+    "valor_implantacao": "0"
+  },
+  "datas": {},
+  "comercial": {
+    "filial": "",
+    "regional": "",
+    "consultor": "",
+    "percentual_exito": ""
+  },
+  "signatarios": {
+    "email_assinante_contrato": "cliente@exemplo.com",
+    "email_consultor_gebras": "consultor@gebras.com.br",
+    "email_coordenador_gebras": "coordenador@gebras.com.br",
+    "email_diretor_gebras": "",
+    "email_financeiro_contratante": "",
+    "email_gestor_contratante": ""
+  },
+  "hub": {
+    "observacoes_detalhes": ""
+  }
+}

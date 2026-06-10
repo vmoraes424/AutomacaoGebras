@@ -53,7 +53,7 @@ _SEED_BRANCH_CONFIG: dict[str, dict[str, str]] = {
 }
 _SEED_DEFAULT_BRANCH_ID = "751"
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 _initialized = False
 
 
@@ -208,6 +208,22 @@ def _init_schema(conn: DbConnection) -> None:
         """
         CREATE INDEX idx_plune_subcentro_lookup
             ON plune_subcentro (branch_id, `level`, pipe_label)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS deal_forms (
+            deal_id INT NOT NULL,
+            schema_version VARCHAR(16) NOT NULL DEFAULT 'v1',
+            owner_user_id INT NULL,
+            owner_name VARCHAR(255) NOT NULL DEFAULT '',
+            deal_title VARCHAR(512) NOT NULL DEFAULT '',
+            status VARCHAR(32) NOT NULL,
+            payload_json JSON NOT NULL,
+            validation_errors_json JSON NULL,
+            created_at VARCHAR(64) NOT NULL,
+            updated_at VARCHAR(64) NOT NULL,
+            submitted_at VARCHAR(64) NULL,
+            PRIMARY KEY (deal_id, schema_version)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
     ]
     for sql in statements:
@@ -373,6 +389,25 @@ def _migrate_schema(conn: DbConnection) -> None:
                     raise
     if version < 10:
         _migrate_deals_processed_pk_deal_id(conn)
+    if version < 11:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deal_forms (
+                deal_id INT NOT NULL,
+                schema_version VARCHAR(16) NOT NULL DEFAULT 'v1',
+                owner_user_id INT NULL,
+                owner_name VARCHAR(255) NOT NULL DEFAULT '',
+                deal_title VARCHAR(512) NOT NULL DEFAULT '',
+                status VARCHAR(32) NOT NULL,
+                payload_json JSON NOT NULL,
+                validation_errors_json JSON NULL,
+                created_at VARCHAR(64) NOT NULL,
+                updated_at VARCHAR(64) NOT NULL,
+                submitted_at VARCHAR(64) NULL,
+                PRIMARY KEY (deal_id, schema_version)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """
+        )
     conn.execute(
         "UPDATE app_meta SET value = %s WHERE `key` = 'schema_version'",
         (str(_SCHEMA_VERSION),),

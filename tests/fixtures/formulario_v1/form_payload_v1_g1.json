@@ -1,0 +1,50 @@
+{
+  "schema_version": "v1",
+  "cliente": {
+    "contratante": "Empresa Exemplo Gestao Ltda",
+    "documento": "52398605000186",
+    "endereco": "Rua das Flores, 100, Centro",
+    "cep": "96015560",
+    "municipio_estado": "Pelotas - RS, Brasil",
+    "inscricao_estadual": "1234567890",
+    "inscricao_municipal": "987654",
+    "notas": "Cliente referencia golden G1",
+    "codigo_cliente_instalacao": "352/665,1942"
+  },
+  "servicos": {
+    "sole_web": 4,
+    "sole_consultoria": 2,
+    "gestao_acl": 6,
+    "gestao_usina_fotovoltaica": 0,
+    "gestao_qualidade_energia": 5,
+    "quantidade_ucs": 12
+  },
+  "valores": {
+    "valor_recorrencia": "1500.00",
+    "valor_implantacao": "7000.00"
+  },
+  "datas": {
+    "data_pagamento_implantacao": "2026-07-15",
+    "data_primeira_cobranca": "2026-08-01"
+  },
+  "comercial": {
+    "filial": "Matriz",
+    "regional": "Sul",
+    "consultor": "Consultor Teste",
+    "percentual_exito": "15%"
+  },
+  "signatarios": {
+    "email_assinante_contrato": "cliente@exemplo.com.br",
+    "email_consultor_gebras": "consultor@gebras.com.br",
+    "email_coordenador_gebras": "coordenador@gebras.com.br",
+    "email_diretor_gebras": "diretor@gebras.com.br",
+    "email_financeiro_contratante": "financeiro@exemplo.com.br",
+    "email_gestor_contratante": "gestor@exemplo.com.br"
+  },
+  "hub": {
+    "observacoes_detalhes": "UC = 00665 - SOLE WEB + Gestão ACL - Mercado Livre de Energia = 1.500,92; UC = 01942 - ACL + Sole Consultoria = 454.564,00"
+  },
+  "anexos": {
+    "proposta_comercial_anexada": true
+  }
+}

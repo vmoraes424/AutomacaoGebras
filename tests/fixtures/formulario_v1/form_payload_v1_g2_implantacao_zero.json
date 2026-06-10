@@ -1,0 +1,46 @@
+{
+  "schema_version": "v1",
+  "cliente": {
+    "contratante": "Cliente Sem Implantação Ltda",
+    "documento": "11222333000144",
+    "endereco": "Av. Teste, 50",
+    "cep": "80010000",
+    "municipio_estado": "Curitiba - PR, Brasil",
+    "inscricao_estadual": "ISENTO",
+    "inscricao_municipal": "N/A",
+    "notas": "Golden G2",
+    "codigo_cliente_instalacao": "100/200"
+  },
+  "servicos": {
+    "sole_web": 3,
+    "sole_consultoria": 0,
+    "gestao_acl": 0,
+    "gestao_usina_fotovoltaica": 0,
+    "gestao_qualidade_energia": 0,
+    "quantidade_ucs": 3
+  },
+  "valores": {
+    "valor_recorrencia": "2500.00",
+    "valor_implantacao": "0"
+  },
+  "datas": {
+    "data_primeira_cobranca": "2026-09-01"
+  },
+  "comercial": {
+    "filial": "Matriz",
+    "regional": "Sul",
+    "consultor": "Consultor Teste",
+    "percentual_exito": "A definir"
+  },
+  "signatarios": {
+    "email_assinante_contrato": "a@exemplo.com",
+    "email_consultor_gebras": "b@gebras.com.br",
+    "email_coordenador_gebras": "c@gebras.com.br",
+    "email_diretor_gebras": "d@gebras.com.br",
+    "email_financeiro_contratante": "e@exemplo.com",
+    "email_gestor_contratante": "f@exemplo.com"
+  },
+  "hub": {
+    "observacoes_detalhes": ""
+  }
+}

@@ -21,3 +21,7 @@ _classcgi_out.html
 
 # Cursor hook caches
 .cursor/hooks/__pycache__/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
