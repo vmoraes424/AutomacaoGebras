@@ -26,6 +26,83 @@ export type CrmDeal = {
   ready_for_automation?: boolean;
 };
 
+export type UcServicoKey =
+  | "sole_web"
+  | "sole_consultoria"
+  | "gestao_acl"
+  | "gestao_usina_fotovoltaica"
+  | "gestao_qualidade_energia";
+
+export type UcServicoCelula = {
+  ativo: boolean;
+  valor: string;
+};
+
+export type UcLinhaV1 = {
+  codigo_instalacao: number;
+  identificacao: string;
+  razao_social: string;
+  cidade: string;
+  uf: string;
+  servicos: Record<UcServicoKey, UcServicoCelula>;
+};
+
+export type HubInstalacao = {
+  codigo: number;
+  codigo_cliente: number;
+  identificacao: string;
+  razao_social: string;
+  cidade: string;
+  uf: string;
+  ativo: boolean;
+  selecionada: boolean;
+};
+
+/** pedido_nome_servico — colunas da matriz UC × serviço */
+export type HubServicoCatalogo = {
+  codigo_servico: number;
+  chave: string;
+  nome: string;
+  sigla: string;
+  nome_pipe: string;
+  ordem_form: number;
+};
+
+/** pedido_instalacao_servico + valor no form (soma → pedido_instalacao_extra.valor) */
+export type HubServicoItem = {
+  codigo_servico: number;
+  chave: string;
+  nome: string;
+  sigla: string;
+  nome_pipe: string;
+  ativo: boolean;
+  valor: string;
+};
+
+/** pedido_instalacao_extra + serviços filhos */
+export type HubInstalacaoPedido = {
+  codigo_instalacao: number;
+  codigo_cliente: number;
+  identificacao: string;
+  razao_social: string;
+  cidade: string;
+  uf: string;
+  valor_uc: string;
+  servicos: HubServicoItem[];
+};
+
+export type HubServicosResponse = {
+  servicos: HubServicoCatalogo[];
+};
+
+export type HubInstalacoesResponse = {
+  codigo_cliente: number;
+  codigos_instalacao_selecionados: number[];
+  formato_pipedrive: string;
+  instalacoes: HubInstalacao[];
+  codigos_nao_encontrados: number[];
+};
+
 export type FormPayloadV1 = {
   schema_version: string;
   cliente: {
@@ -46,6 +123,7 @@ export type FormPayloadV1 = {
     gestao_usina_fotovoltaica: number;
     gestao_qualidade_energia: number;
     quantidade_ucs: number;
+    uc_linhas?: UcLinhaV1[];
   };
   valores: {
     valor_recorrencia: string;
@@ -71,6 +149,8 @@ export type FormPayloadV1 = {
   };
   hub: {
     observacoes_detalhes: string;
+    valor_total: string;
+    instalacoes: HubInstalacaoPedido[];
   };
   anexos?: {
     proposta_comercial_anexada: boolean;

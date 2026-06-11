@@ -10,6 +10,7 @@ import {
   ServicosSection,
   SignatariosSection,
   ValoresDatasSection,
+  type PipeFieldSync,
 } from "../components/FormFields";
 import { SyncToastStack, useSyncToasts } from "../components/SyncToast";
 import { isPipeField } from "../constants/pipeFields";
@@ -105,22 +106,63 @@ export function DealFormPage() {
     });
   }, []);
 
+  const syncMeta = useCallback(
+    () => ({
+      owner_user_id: ownerUserId,
+      owner_name: ownerName,
+      deal_title: dealTitle,
+    }),
+    [ownerUserId, ownerName, dealTitle],
+  );
+
   const handleFieldBlur = useCallback(
     async (fieldPath: string, value: string | number) => {
       if (readOnly || !isPipeField(fieldPath)) return;
       try {
-        await api.syncFieldToPipedrive(dealIdNum, fieldPath, value, {
-          owner_user_id: ownerUserId,
-          owner_name: ownerName,
-          deal_title: dealTitle,
-        });
+        await api.syncFieldToPipedrive(dealIdNum, fieldPath, value, syncMeta());
         triggerFieldPulse(fieldPath);
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Erro ao sincronizar campo";
         addToast(labelForFieldPath(fieldPath), msg);
       }
     },
-    [dealIdNum, readOnly, addToast, triggerFieldPulse, ownerUserId, ownerName, dealTitle],
+    [dealIdNum, readOnly, addToast, triggerFieldPulse, syncMeta],
+  );
+
+  const persistDraftQuiet = useCallback(
+    async (nextPayload: FormPayloadV1) => {
+      if (readOnly) return;
+      try {
+        await api.saveDraft(dealIdNum, {
+          payload: nextPayload,
+          schema_version: "v1",
+          owner_user_id: ownerUserId,
+          owner_name: ownerName,
+          deal_title: dealTitle,
+        });
+      } catch {
+        /* rascunho HUB; falha silenciosa — usuário pode salvar manualmente */
+      }
+    },
+    [dealIdNum, readOnly, ownerUserId, ownerName, dealTitle],
+  );
+
+  const handleSyncPipeFields = useCallback(
+    async (fields: PipeFieldSync[]) => {
+      if (readOnly) return;
+      for (const { path, value } of fields) {
+        if (!isPipeField(path)) continue;
+        try {
+          await api.syncFieldToPipedrive(dealIdNum, path, value, syncMeta());
+          triggerFieldPulse(path);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Erro ao sincronizar campo";
+          addToast(labelForFieldPath(path), msg);
+          break;
+        }
+      }
+    },
+    [dealIdNum, readOnly, addToast, triggerFieldPulse, syncMeta],
   );
 
   const handleSaveDraft = async () => {
@@ -181,6 +223,8 @@ export function DealFormPage() {
     disabled: readOnly,
     fieldErrors: validationErrors ?? undefined,
     onFieldBlur: handleFieldBlur,
+    onSyncPipeFields: handleSyncPipeFields,
+    onPersistDraft: persistDraftQuiet,
     fieldSyncPulse,
     onFieldPulseEnd: clearFieldPulse,
   };

@@ -75,6 +75,11 @@ Ordem Clicksign: Consultor → Coordenador → Cliente → Diretor (`SIGNER_FIEL
 
 Instalações HUB vêm de `cliente.codigo_cliente_instalacao` (`352/665,1942`), não de `notas`.
 
+**Portal (matriz HUB):** `servicos.uc_linhas[].servicos.{key}.{ativo,valor}`. Ao editar:
+- **Rascunho:** `hub.observacoes_detalhes` — `UC = <IDENTIFICACAO> - SERV1 + SERV2 = <soma R$ UC>;` (worker/HUB no ganho)
+- **Pipe em tempo real:** só `cliente.codigo_cliente_instalacao` (`352/665,1942`)
+- **Pipe inalterado pela matriz:** `servicos.*`, `quantidade_ucs` (varchar), `valores.valor_recorrencia` — preenchidos como antes
+
 ## Somente Pipedrive (não migrar para formulário no MVP)
 
 | Campo | Uso |

@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       "/pipedrive": "http://localhost:8000",
       "/forms": "http://localhost:8000",
+      "/hub": "http://localhost:8000",
       "/health": "http://localhost:8000",
     },
   },

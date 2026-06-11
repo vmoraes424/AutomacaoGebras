@@ -76,7 +76,9 @@ def client():
 
 @patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.deal_esta_em_etapa_contrato")
 @patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.requests.get")
-def test_list_deals_enriched_com_status_form(mock_get, mock_em_contrato, client):
+def test_list_deals_enriched_com_status_form(
+    mock_get, mock_em_contrato, client, eligible_pipe_deal
+):
     mock_em_contrato.side_effect = lambda d: d.get("id") in (746, 999)
 
     page = MagicMock()
@@ -149,7 +151,7 @@ def test_list_deals_enriched_com_status_form(mock_get, mock_em_contrato, client)
 
 @patch("core.form_pipe_sync.notificar_formulario_enviado_pipedrive")
 @patch("core.form_pipe_sync.push_form_to_pipedrive")
-def test_submit_validado_cria_nota_pipe(_sync, mock_nota, client):
+def test_submit_validado_cria_nota_pipe(_sync, mock_nota, client, eligible_pipe_deal):
     fixture = (
         Path(__file__).resolve().parent
         / "fixtures"

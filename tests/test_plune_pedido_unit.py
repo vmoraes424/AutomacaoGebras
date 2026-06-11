@@ -26,11 +26,12 @@ from core.plune_pedido import (
 )
 from core.pedido_anexos import CacheAnexosDeal
 from core.pipedrive_fields import (
-    FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_CODIGO_CLIENTE_INSTALACAO,
+    FIELD_GESTAO_USINA_FOTOVOLTAICA,
     FIELD_NOTAS,
     FIELD_OBSERVACOES_DETALHES,
     FIELD_PERCENTUAL_EXITO,
+    FIELD_QUANTIDADE_UCS,
     FIELD_VALOR_IMPLANTACAO,
     FIELD_VALOR_MENSAL,
 )
@@ -50,6 +51,7 @@ def _deal_comissao():
             FIELD_VALOR_IMPLANTACAO: "7000",
             FIELD_VALOR_MENSAL: "789",
             FIELD_GESTAO_USINA_FOTOVOLTAICA: 7,
+            FIELD_QUANTIDADE_UCS: 7,
         },
     }
 

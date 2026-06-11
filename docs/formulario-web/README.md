@@ -12,6 +12,7 @@ Documentação da iniciativa de substituir o preenchimento no Pipedrive por um p
 | [cenarios-golden.md](cenarios-golden.md) | Cenários golden para regressão na Fase 5 |
 | [schema-v1-map.json](schema-v1-map.json) | Mapa chave JSON v1 → hash Pipedrive (adaptador Fase 5) |
 | [validacao-deal-746.md](validacao-deal-746.md) | GET API real no deal 746 (validação Fase 0) |
+| [integracao-staging.md](integracao-staging.md) | Runbook integração staging (API real, sync 30 campos, worker) |
 | [ddd-pragmatico.md](ddd-pragmatico.md) | Arquitetura DDD pragmática do portal |
 | [../task-decomposition-formulario-web.md](../task-decomposition-formulario-web.md) | Decomposição completa do projeto |
 
@@ -31,3 +32,5 @@ Fixtures JSON anonimizadas em [`tests/fixtures/formulario_v1/`](../../tests/fixt
 | 5 — Integração worker | ✅ Concluída — ver [fase-5-integracao-worker.md](fase-5-integracao-worker.md) |
 | 6 — Fluxo operacional | ✅ Concluída — ver [fase-6-operacional.md](fase-6-operacional.md) |
 | 7 — Hardening e produção | ✅ Concluída — ver [fase-7-hardening.md](fase-7-hardening.md) |
+| 8 — Sync Pipedrive tempo real | ✅ Concluída — ver [task-decomposition § Fase 8](../task-decomposition-formulario-web.md) |
+| Integração staging | ✅ Documentada — [integracao-staging.md](integracao-staging.md) |

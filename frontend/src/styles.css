@@ -131,6 +131,91 @@ button:disabled {
   gap: 0.75rem;
 }
 
+.field-hint {
+  font-size: 0.8rem;
+  color: #6c757d;
+  margin-top: 0.15rem;
+}
+
+.uc-servicos-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+.uc-servicos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.uc-servicos-table th,
+.uc-servicos-table td {
+  border: 1px solid #dee2e6;
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.uc-servicos-table thead th {
+  background: #f8f9fa;
+  font-weight: 600;
+}
+
+.uc-servicos-th-check,
+.uc-servicos-td-check {
+  text-align: center;
+  min-width: 4.5rem;
+}
+
+.uc-servicos-td-check input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.uc-servicos-total {
+  font-weight: 600;
+  text-align: center;
+  background: #f8f9fa;
+}
+
+.uc-servico-celula {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 5.5rem;
+}
+
+.uc-servico-check {
+  flex-direction: row;
+  align-items: center;
+}
+
+.uc-servico-valor {
+  width: 100%;
+  max-width: 6.5rem;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+.uc-hub-preview textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
 label {
   display: flex;
   flex-direction: column;

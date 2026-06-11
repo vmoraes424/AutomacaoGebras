@@ -56,6 +56,28 @@ class ClienteV1(_FormSection):
     codigo_cliente_instalacao: str = ""
 
 
+class UcServicoCelulaV1(_FormSection):
+    ativo: bool = False
+    valor: str = ""
+
+
+class UcServicosMatrizV1(_FormSection):
+    sole_web: UcServicoCelulaV1 = Field(default_factory=UcServicoCelulaV1)
+    sole_consultoria: UcServicoCelulaV1 = Field(default_factory=UcServicoCelulaV1)
+    gestao_acl: UcServicoCelulaV1 = Field(default_factory=UcServicoCelulaV1)
+    gestao_usina_fotovoltaica: UcServicoCelulaV1 = Field(default_factory=UcServicoCelulaV1)
+    gestao_qualidade_energia: UcServicoCelulaV1 = Field(default_factory=UcServicoCelulaV1)
+
+
+class UcLinhaV1(_FormSection):
+    codigo_instalacao: int = 0
+    identificacao: str = ""
+    razao_social: str = ""
+    cidade: str = ""
+    uf: str = ""
+    servicos: UcServicosMatrizV1 = Field(default_factory=UcServicosMatrizV1)
+
+
 class ServicosV1(_FormSection):
     sole_web: int = 0
     sole_consultoria: int = 0
@@ -63,6 +85,7 @@ class ServicosV1(_FormSection):
     gestao_usina_fotovoltaica: int = 0
     gestao_qualidade_energia: int = 0
     quantidade_ucs: int = 0
+    uc_linhas: list[UcLinhaV1] = Field(default_factory=list)
 
     @field_validator(
         "sole_web",
@@ -109,8 +132,35 @@ class SignatariosV1(_FormSection):
     email_gestor_contratante: str = ""
 
 
+class HubServicoItemV1(_FormSection):
+    """Uma linha de pedido_instalacao_servico + valor no form (soma → pedido_instalacao_extra)."""
+
+    codigo_servico: int = 0
+    chave: str = ""
+    nome: str = ""
+    sigla: str = ""
+    nome_pipe: str = ""
+    ativo: bool = False
+    valor: str = ""
+
+
+class HubInstalacaoPedidoV1(_FormSection):
+    """UC no pedido HUB — espelha pedido_instalacao_extra + serviços filhos."""
+
+    codigo_instalacao: int = 0
+    codigo_cliente: int = 0
+    identificacao: str = ""
+    razao_social: str = ""
+    cidade: str = ""
+    uf: str = ""
+    valor_uc: str = ""
+    servicos: list[HubServicoItemV1] = Field(default_factory=list)
+
+
 class HubV1(_FormSection):
     observacoes_detalhes: str = ""
+    valor_total: str = ""
+    instalacoes: list[HubInstalacaoPedidoV1] = Field(default_factory=list)
 
 
 class AnexosV1(_FormSection):
@@ -167,7 +217,9 @@ PIPE_TO_FORM_PATH: dict[str, str] = {v: k for k, v in FORM_PATH_TO_PIPE.items()}
 
 
 def parse_form_payload_v1(payload: dict[str, Any]) -> FormPayloadV1:
-    return FormPayloadV1.model_validate(payload or {})
+    from core.form_uc_hub import normalize_hub_payload
+
+    return FormPayloadV1.model_validate(normalize_hub_payload(payload or {}))
 
 
 def form_payload_to_deal_dict(deal_id: int, payload: FormPayloadV1) -> dict[str, Any]:

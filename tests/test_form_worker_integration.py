@@ -84,6 +84,7 @@ def test_form_ausente_no_adaptador_nao_chama_plune(_load, mock_plune, _fill):
     mock_plune.assert_not_called()
 
 
+@patch("core.automacao_contrato.FORMULARIO_WEB_ENABLED", True)
 def test_form_validated_usa_merge_e_processa():
     from contextlib import ExitStack
 

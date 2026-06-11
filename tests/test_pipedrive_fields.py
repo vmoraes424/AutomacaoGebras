@@ -123,6 +123,12 @@ class TestParseCodigoClienteInstalacao:
         with pytest.raises(ValueError, match="instalação"):
             parse_codigo_cliente_instalacao("352/abc")
 
+    def test_format_codigo_cliente_instalacao(self):
+        from core.pipedrive_fields import format_codigo_cliente_instalacao
+
+        assert format_codigo_cliente_instalacao(352, []) == "352"
+        assert format_codigo_cliente_instalacao(352, [665, 1942]) == "352/665,1942"
+
 
 class TestSplitCidadeEstado:
     def test_formato_pipedrive_hifen(self):

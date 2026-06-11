@@ -72,3 +72,47 @@ def test_fluxo_portal_submit_worker_dev():
         "processing",
         "processed",
     )
+
+
+@_requires_integration
+def test_sync_todos_campos_mapeados_pipe_v2():
+    """Blur/sync de cada campo mapeado no deal de integração (schema v2)."""
+    from fastapi.testclient import TestClient
+
+    from core.form_schema_v1 import FORM_PATH_TO_PIPE
+    from core.pipe_v2_schema import validate_pipe_custom_field
+    from portal.composition import reset_container
+    from portal.main import create_app
+
+    deal_id = os.environ.get("INTEGRATION_DEAL_ID")
+    if not deal_id:
+        pytest.skip("defina INTEGRATION_DEAL_ID no ambiente")
+
+    deal_id = int(deal_id)
+    reset_container()
+    client = TestClient(create_app())
+
+    form = client.get(f"/forms/{deal_id}")
+    assert form.status_code == 200
+    payload = form.json()["payload"]
+
+    def _value(path: str) -> object:
+        section, _, field = path.partition(".")
+        return payload[section][field]
+
+    for field_path, pipe_hash in FORM_PATH_TO_PIPE.items():
+        response = client.post(
+            f"/forms/{deal_id}/sync-field",
+            json={
+                "field_path": field_path,
+                "value": _value(field_path),
+                "schema_version": "v1",
+            },
+        )
+        assert response.status_code == 200, (
+            f"sync-field {field_path} -> {response.status_code}: {response.text[:300]}"
+        )
+        from core.form_pipe_sync import form_field_to_pipe_value
+
+        converted = form_field_to_pipe_value(pipe_hash, field_path, _value(field_path))
+        validate_pipe_custom_field(pipe_hash, converted, field_path=field_path)

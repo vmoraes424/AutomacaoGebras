@@ -6,6 +6,7 @@ from portal.application.formulario.deal_eligibility import fetch_deal_eligible_f
 from portal.domain.formulario.entities import DealForm
 from portal.domain.formulario.exceptions import DealFormNotFoundError
 from portal.domain.formulario.repositories import DealFormRepository
+
 DealFetcher = Callable[[int], dict | None]
 DealToForm = Callable[[dict], dict]
 FormHydrator = Callable[[dict, dict], dict]
@@ -40,46 +41,42 @@ class OpenDealForm:
         deal_title: str = "",
         schema_version: str = "v1",
     ) -> DealForm:
-        fetch = self._fetch_deal
-        if fetch is None:
-            fetch = fetch_deal_eligible_for_form
-
         existing = self._repository.get_by_deal_id(deal_id, schema_version=schema_version)
         if existing is not None and not existing.status.is_editable():
             return existing
 
-        fetch = self._fetch_deal
-        if fetch is None:
-            fetch = fetch_deal_eligible_for_form
+        if existing is not None:
+            from core.form_pipe_sync import fetch_deal_for_form
 
+            fetch_pipe = self._fetch_deal or fetch_deal_for_form
+            deal_pipe = fetch_pipe(deal_id)
+            if not deal_pipe:
+                return existing
+            pipe_payload = self._deal_to_form(deal_pipe)
+            if existing.status.is_editable():
+                hydrated = self._hydrate(existing.payload, pipe_payload)
+                if hydrated != existing.payload:
+                    return self._repository.save_draft(
+                        deal_id,
+                        payload=hydrated,
+                        schema_version=schema_version,
+                        owner_user_id=existing.owner_user_id or owner_user_id,
+                        owner_name=existing.owner_name or owner_name,
+                        deal_title=existing.deal_title or deal_title,
+                    )
+            return existing
+
+        fetch = self._fetch_deal or fetch_deal_eligible_for_form
         deal_pipe = fetch(deal_id)
         if not deal_pipe:
-            if existing is not None:
-                return existing
             raise DealFormNotFoundError(deal_id)
 
         pipe_payload = self._deal_to_form(deal_pipe)
-
-        if existing is None:
-            return self._repository.save_draft(
-                deal_id,
-                payload=pipe_payload,
-                schema_version=schema_version,
-                owner_user_id=owner_user_id,
-                owner_name=owner_name,
-                deal_title=deal_title or str(deal_pipe.get("title") or ""),
-            )
-
-        if existing.status.is_editable():
-            hydrated = self._hydrate(existing.payload, pipe_payload)
-            if hydrated != existing.payload:
-                return self._repository.save_draft(
-                    deal_id,
-                    payload=hydrated,
-                    schema_version=schema_version,
-                    owner_user_id=existing.owner_user_id or owner_user_id,
-                    owner_name=existing.owner_name or owner_name,
-                    deal_title=existing.deal_title or deal_title,
-                )
-
-        return existing
+        return self._repository.save_draft(
+            deal_id,
+            payload=pipe_payload,
+            schema_version=schema_version,
+            owner_user_id=owner_user_id,
+            owner_name=owner_name,
+            deal_title=deal_title or str(deal_pipe.get("title") or ""),
+        )

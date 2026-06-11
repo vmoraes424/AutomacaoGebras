@@ -74,9 +74,18 @@ def test_smoke_list_deals(mock_get, mock_em_contrato, client):
     assert deals[0]["operational_label"] == "pendente"
 
 
+@patch("portal.application.formulario.deal_eligibility.deal_elegivel_formulario_contrato", return_value=True)
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
 @patch("core.form_pipe_sync.fetch_deal_for_form")
-def test_smoke_form_deal_teste(mock_fetch, client):
-    mock_fetch.return_value = {"id": 746, "title": "Smoke", "custom_fields": {}}
+def test_smoke_form_deal_teste(mock_fetch, mock_elig_fetch, _elegivel, client):
+    deal = {
+        "id": 746,
+        "title": "Smoke",
+        "status": "open",
+        "custom_fields": {},
+    }
+    mock_fetch.return_value = deal
+    mock_elig_fetch.return_value = deal
     response = client.get("/forms/746")
     assert response.status_code == 200
     assert response.json()["deal_id"] == 746

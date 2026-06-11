@@ -45,6 +45,7 @@ jobs:
             tests/test_form_operational_smoke.py \
             tests/test_form_persistence.py \
             tests/test_form_pipe_sync.py \
+            tests/test_form_pipe_all_fields.py \
             tests/test_form_regression_legacy.py \
             tests/test_form_rollback.py \
             tests/test_form_schema_v1.py \

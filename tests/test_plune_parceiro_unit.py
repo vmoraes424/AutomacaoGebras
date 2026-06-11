@@ -48,6 +48,13 @@ def _deal_novo_cliente(*, deal_id: int = 746) -> dict:
     }
 
 
+@pytest.fixture(autouse=True)
+def _plune_parceiro_tipo_cliente():
+    """Testes de Insert/Browse assumem parceiro cliente (default Gebras é fornecedor)."""
+    with patch("core.plune_pedido.PLUNE_PARCEIRO_TIPO", "cliente"):
+        yield
+
+
 def _parceiro_plune_row(
     *,
     parceiro_id: str = "5001",

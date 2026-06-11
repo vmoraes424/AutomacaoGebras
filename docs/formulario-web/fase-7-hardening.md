@@ -101,14 +101,16 @@ pytest tests/test_form_hardening_smoke.py -q
 
 ## Integração em staging
 
-Antes de produção, rodar uma vez:
+Runbook completo: **[integracao-staging.md](integracao-staging.md)** (checklist manual + deal 746).
+
+Comando mínimo:
 
 ```bash
-RUN_INTEGRATION=1 INTEGRATION_OWNER_ID=<id> INTEGRATION_DEAL_ID=<id> \
+RUN_INTEGRATION=1 INTEGRATION_OWNER_ID=24587114 INTEGRATION_DEAL_ID=746 \
   pytest tests/test_form_operational_integration.py -m integration -v
 ```
 
-Skip documentado em `tests/test_form_operational_integration.py` (exige `RUN_INTEGRATION=1`).
+Inclui `test_sync_todos_campos_mapeados_pipe_v2` (30 campos, schema Pipedrive v2).
 
 ## Skips rastreáveis
 

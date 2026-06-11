@@ -19,7 +19,8 @@ describe("DealListPage", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
-      vi.fn((url: string) => {
+      vi.fn((input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
         if (url.includes("/pipedrive/deals")) {
           return Promise.resolve({
             ok: true,

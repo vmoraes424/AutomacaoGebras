@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from portal.interfaces.http.middleware.auth import PortalAuthMiddleware
 from portal.interfaces.http.middleware.request_logging import RequestLoggingMiddleware
-from portal.interfaces.http.routers import forms, health, pipedrive
+from portal.interfaces.http.routers import forms, health, hub, pipedrive
 
 
 def create_app() -> FastAPI:
@@ -27,6 +27,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(pipedrive.router)
+    app.include_router(hub.router)
     app.include_router(forms.router)
     return app
 

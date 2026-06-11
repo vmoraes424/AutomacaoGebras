@@ -23,7 +23,7 @@ def client():
     reset_container()
 
 
-def test_fixture_g1_aceito_pelo_backend(client):
+def test_fixture_g1_aceito_pelo_backend(client, eligible_pipe_deal):
     payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
     body = {
         "payload": payload,

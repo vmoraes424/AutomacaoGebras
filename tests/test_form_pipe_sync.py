@@ -139,6 +139,17 @@ def test_sync_campo_servico_envia_numero(mock_patch):
 
 
 @patch("core.form_pipe_sync.requests.patch")
+def test_sync_quantidade_ucs_envia_string_varchar(mock_patch):
+    mock_patch.return_value = MagicMock(ok=True, status_code=200, text="{}")
+    from core.pipedrive_fields import FIELD_QUANTIDADE_UCS
+
+    sync_form_field_to_pipedrive(746, "servicos.quantidade_ucs", 2)
+    body = mock_patch.call_args.kwargs["json"]
+    assert body["custom_fields"][FIELD_QUANTIDADE_UCS] == "2"
+    assert isinstance(body["custom_fields"][FIELD_QUANTIDADE_UCS], str)
+
+
+@patch("core.form_pipe_sync.requests.patch")
 def test_sync_campo_monetary_envia_objeto(mock_patch):
     mock_patch.return_value = MagicMock(ok=True, status_code=200, text="{}")
     sync_form_field_to_pipedrive(746, "valores.valor_recorrencia", "1.805")

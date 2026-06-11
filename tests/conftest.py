@@ -86,6 +86,30 @@ def form_payload_v1_minimo() -> dict:
 
 
 @pytest.fixture
+def eligible_pipe_deal() -> dict:
+    """Deal aberto em Contrato para submit/open (sem rede)."""
+    deal = {
+        "id": 746,
+        "title": "Biview",
+        "status": "open",
+        "stage_id": 7,
+        "pipeline_id": 1,
+        "custom_fields": {},
+    }
+    with (
+        patch(
+            "portal.application.formulario.deal_eligibility.fetch_deal_for_form",
+            return_value=deal,
+        ),
+        patch(
+            "portal.application.formulario.deal_eligibility.deal_elegivel_formulario_contrato",
+            return_value=True,
+        ),
+    ):
+        yield deal
+
+
+@pytest.fixture
 def deal_form_record_draft(form_payload_v1_minimo: dict) -> dict:
     return {
         "deal_id": 746,

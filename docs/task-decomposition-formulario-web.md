@@ -452,6 +452,7 @@ Fase 0
   -> Fase 5
   -> Fase 6
   -> Fase 7
+  -> Fase 8
 ```
 
 Paralelizavel depois da Fase 0:
@@ -460,6 +461,39 @@ Paralelizavel depois da Fase 0:
 - Schema do formulario e layout visual podem evoluir em paralelo, desde que a versao `v1` seja respeitada.
 - Hardening pode comecar antes da integracao final, mas nao deve bloquear o prototipo local.
 - **Testes de cada fase sao prerequisito da fase seguinte** (gate G2).
+
+### Fase 8 - Sync Pipedrive em tempo real ✅ CONCLUÍDA
+
+Objetivo: sincronizar campos mapeados ao Pipe no blur/submit sem erros 400 da API v2.
+
+**Entregáveis:** `core/form_pipe_sync.py`, `core/pipe_v2_schema.py`, `POST /forms/{id}/sync-field`, `POST /sync-pipedrive`, frontend blur + pulse, `tests/test_form_pipe_all_fields.py`, fixture `form_payload_v1_biview_746.json`.
+
+Tarefas:
+
+- Conversao por tipo v2: address (`{value}`), set (`[id]`), enum (`int`), monetary (`{value, currency}`), numerico UC (`int`), date (ISO), texto (`str`).
+- Validacao pre-PATCH (`validate_pipe_custom_fields`) antes de chamar a API.
+- Campos monetarios com `R$` e separador de milhar no frontend (`MoneyField`).
+- Rascunho MySQL em background no sync-field; overlay Pipe ao abrir formulario.
+
+Testes:
+
+- `tests/test_form_pipe_all_fields.py`: 68 casos — cada campo mapeado + payload Biview completo.
+- `tests/test_form_pipe_sync.py`: regressao unitaria.
+- CI: job `pytest-portal` inclui `test_form_pipe_all_fields.py`.
+- Integracao opcional: `test_sync_todos_campos_mapeados_pipe_v2` em `test_form_operational_integration.py` (`RUN_INTEGRATION=1`).
+
+Gate G2 executado (portal/form):
+
+```bash
+pytest tests/test_form_*.py tests/test_portal_*.py -m "not integration" -q
+cd frontend && npm test -- --run
+```
+
+Criterios de aceite:
+
+- Nenhum campo mapeado envia formato v1 legado (string em numerico, monetary sem objeto, etc.).
+- Erro de schema e local (`502` com mensagem clara), nao 400 opaco do Pipe.
+- Suite portal/form verde no CI.
 
 ## 10. Pontos De Cuidado No `core`
 
@@ -536,4 +570,22 @@ A iniciativa pode ser considerada pronta quando:
 - **Cenarios golden passam com flag ligada.**
 - **Todo endpoint e adaptador novo tem teste unitario.**
 - **CI bloqueia merge com regressao.**
+
+### Status (validado em 03/2026)
+
+| Critério | Status |
+|----------|--------|
+| Portal + validação + worker + rollback | ✅ |
+| Golden G1–G6 (`test_form_regression_legacy.py`) | ✅ |
+| Sync Pipe v2 — 30 campos (`test_form_pipe_all_fields.py`) | ✅ |
+| CI `pytest-portal` + Vitest | ✅ |
+| Integração staging documentada | ✅ [integracao-staging.md](formulario-web/integracao-staging.md) |
+| Suite completa `-m "not integration"` | ✅ (gate local) |
+
+Comando de gate final:
+
+```bash
+pytest -m "not integration" -q
+cd frontend && npm test -- --run
+```
 

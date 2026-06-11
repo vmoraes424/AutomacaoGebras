@@ -22,6 +22,7 @@ export function emptyFormPayloadV1(): FormPayloadV1 {
       gestao_usina_fotovoltaica: 0,
       gestao_qualidade_energia: 0,
       quantidade_ucs: 0,
+      uc_linhas: [],
     },
     valores: {
       valor_recorrencia: "",
@@ -47,6 +48,8 @@ export function emptyFormPayloadV1(): FormPayloadV1 {
     },
     hub: {
       observacoes_detalhes: "",
+      valor_total: "",
+      instalacoes: [],
     },
   };
 }
@@ -59,11 +62,19 @@ export function mergeFormPayloadV1(saved: Partial<FormPayloadV1> | undefined): F
     ...base,
     ...saved,
     cliente: { ...base.cliente, ...saved.cliente },
-    servicos: { ...base.servicos, ...saved.servicos },
+    servicos: {
+      ...base.servicos,
+      ...saved.servicos,
+      uc_linhas: saved.servicos?.uc_linhas ?? base.servicos.uc_linhas,
+    },
     valores: { ...base.valores, ...saved.valores },
     datas: { ...base.datas, ...saved.datas },
     comercial: { ...base.comercial, ...saved.comercial },
     signatarios: { ...base.signatarios, ...saved.signatarios },
-    hub: { ...base.hub, ...saved.hub },
+    hub: {
+      ...base.hub,
+      ...saved.hub,
+      instalacoes: saved.hub?.instalacoes ?? base.hub.instalacoes,
+    },
   };
 }

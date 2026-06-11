@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from portal.application.crm.list_deals_contrato import ListDealsContrato
 from portal.application.crm.list_deals_enriched import ListDealsContratoEnriched
 from portal.application.crm.list_users import ListCrmUsers
+from portal.application.hub.list_instalacoes import ListHubInstalacoes
+from portal.application.hub.list_servicos import ListHubServicos
 from portal.application.formulario.get_deal_form import GetDealForm
 from portal.application.formulario.get_status import GetDealFormStatus
 from portal.application.formulario.open_deal_form import OpenDealForm
@@ -54,6 +56,8 @@ class PortalContainer:
     list_crm_users: ListCrmUsers
     list_deals_contrato: ListDealsContrato
     list_deals_enriched: ListDealsContratoEnriched
+    list_hub_instalacoes: ListHubInstalacoes
+    list_hub_servicos: ListHubServicos
 
     def reset_for_tests(self) -> None:
         repo = self.deal_form_repository
@@ -90,6 +94,8 @@ def build_container() -> PortalContainer:
             ListDealsContrato(crm_reader),
             deal_form_repository,
         ),
+        list_hub_instalacoes=ListHubInstalacoes(),
+        list_hub_servicos=ListHubServicos(),
     )
 
 

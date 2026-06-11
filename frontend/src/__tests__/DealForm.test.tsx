@@ -2,9 +2,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetApiClientCachesForTests } from "../api/client";
 import { DealFormPage } from "../pages/DealFormPage";
 import { emptyFormPayloadV1 } from "../schemas/formV1";
 import { mockFormRecord } from "../test/mocks";
+
+function fetchUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
 
 function renderForm() {
   return render(
@@ -23,9 +30,24 @@ describe("DealFormPage", () => {
 
   beforeEach(() => {
     savedBody = undefined;
+    resetApiClientCachesForTests();
     vi.stubGlobal(
       "fetch",
-      vi.fn((url: string, init?: RequestInit) => {
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = fetchUrl(input);
+        if (url.includes("/hub/instalacoes")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                codigo_cliente: 0,
+                codigos_instalacao_selecionados: [],
+                formato_pipedrive: "",
+                instalacoes: [],
+                codigos_nao_encontrados: [],
+              }),
+          });
+        }
         if (url.includes("/forms/746") && (!init || init.method === undefined)) {
           return Promise.resolve({
             ok: true,

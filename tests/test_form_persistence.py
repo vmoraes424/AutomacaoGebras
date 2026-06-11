@@ -231,7 +231,9 @@ def test_memory_uniqueness_deal_id_schema_version(memory_repo, form_payload_v1_m
 
 
 @patch("core.form_pipe_sync.push_form_to_pipedrive")
-def test_submit_use_case_with_validator(_sync, memory_repo, form_payload_v1_minimo):
+def test_submit_use_case_with_validator(
+    _sync, memory_repo, form_payload_v1_minimo, eligible_pipe_deal
+):
     def validator(deal_id, payload):
         if not payload.get("cliente", {}).get("documento"):
             return {"cliente.documento": "obrigatório"}

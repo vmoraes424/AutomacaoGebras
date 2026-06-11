@@ -75,7 +75,9 @@ PIPE_FIELDS_ENUM = frozenset(
 )
 PIPE_FIELDS_ADDRESS = frozenset({FIELD_ENDERECO, FIELD_CIDADE})
 PIPE_FIELDS_MONETARY = frozenset({FIELD_VALOR_MENSAL, FIELD_VALOR_IMPLANTACAO})
-PIPE_FIELDS_NUMERIC = frozenset((*CAMPOS_SERVICO_UC, FIELD_QUANTIDADE_UCS))
+# Quantidade de UC's é varchar no Pipe (texto), não double como os demais serviços.
+PIPE_FIELDS_NUMERIC = frozenset(CAMPOS_SERVICO_UC)
+PIPE_FIELDS_TEXT_NUMERIC = frozenset({FIELD_QUANTIDADE_UCS})
 PIPE_FIELDS_DATE = frozenset(
     {FIELD_DATA_PAGAMENTO_IMPLANTACAO, FIELD_DATA_PRIMEIRA_COBRANCA}
 )
@@ -482,6 +484,15 @@ def parse_codigo_cliente_instalacao(raw: str) -> tuple[int, list[int]]:
         return codigo_cliente, _parse_instalacoes(parte_instalacoes)
 
     return _parse_inteiro(texto.split(",")[0], "código do cliente"), []
+
+
+def format_codigo_cliente_instalacao(
+    codigo_cliente: int, codigos_instalacao: list[int] | tuple[int, ...]
+) -> str:
+    """Formato enviado ao Pipedrive: «352» ou «352/1234,3456»."""
+    if not codigos_instalacao:
+        return str(codigo_cliente)
+    return f"{codigo_cliente}/{','.join(str(c) for c in codigos_instalacao)}"
 
 
 def get_numero_contrato(deal_data: dict) -> str:

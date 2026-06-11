@@ -15,6 +15,7 @@ from core.pipedrive_fields import (
     PIPE_FIELDS_MONETARY,
     PIPE_FIELDS_NUMERIC,
     PIPE_FIELDS_SET,
+    PIPE_FIELDS_TEXT_NUMERIC,
     get_val,
     monetary_value_for_pipe,
     option_id_for_enum_field,
@@ -215,6 +216,8 @@ def form_field_to_pipe_value(pipe_hash: str, field_path: str, value: Any) -> Any
             return monetary_value_for_pipe(text)
         except ValueError as exc:
             raise PipeSyncError(str(exc)) from exc
+    if pipe_hash in PIPE_FIELDS_TEXT_NUMERIC:
+        return text
     if pipe_hash in PIPE_FIELDS_NUMERIC:
         try:
             return int(text)

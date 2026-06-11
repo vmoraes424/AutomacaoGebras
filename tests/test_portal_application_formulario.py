@@ -42,7 +42,7 @@ def test_get_raises_when_missing(repo):
 
 
 @patch("core.form_pipe_sync.push_form_to_pipedrive")
-def test_submit_after_draft(_sync, repo):
+def test_submit_after_draft(_sync, repo, eligible_pipe_deal):
     save = SaveDealFormDraft(repo)
     submit = SubmitDealForm(repo)
     save.execute(746, payload={"a": 1})
@@ -51,7 +51,7 @@ def test_submit_after_draft(_sync, repo):
 
 
 @patch("core.form_pipe_sync.push_form_to_pipedrive")
-def test_draft_blocked_after_submit(_sync, repo):
+def test_draft_blocked_after_submit(_sync, repo, eligible_pipe_deal):
     SubmitDealForm(repo).execute(746, payload={"a": 1})
     with pytest.raises(DealFormNotEditableError):
         SaveDealFormDraft(repo).execute(746, payload={"b": 2})

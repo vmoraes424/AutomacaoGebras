@@ -1,7 +1,22 @@
-import type { FormPayloadV1 } from "../api/types";
+import type { FormPayloadV1, HubInstalacaoPedido, HubServicoCatalogo, HubServicoItem } from "../api/types";
 import type { CSSProperties } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { api } from "../api/client";
 import { formatMoneyBr, moneyToStorage, parseMoneyBr } from "../utils/money";
+import { HUB_SERVICOS_CATALOGO_FALLBACK } from "../utils/hubCatalog";
+import {
+  applyHubInstalacoes,
+  catalogoOrdenado,
+  codigoClienteOnly,
+  getHubInstalacoes,
+  mergeHubInstalacoes,
+  parseCodigoClienteInstalacao,
+  countUcsAtivas,
+  pipeFieldsFromUcMatrix,
+  somaValoresHub,
+  sumColunaServico,
+  valorUcInstalacao,
+} from "../utils/ucServicos";
 import {
   composeFieldClass,
   fieldError,
@@ -9,12 +24,16 @@ import {
   type FieldSyncUiProps,
 } from "./formFieldSyncUi";
 
+export type PipeFieldSync = { path: string; value: string | number };
+
 type SectionProps = {
   payload: FormPayloadV1;
   onChange: (next: FormPayloadV1) => void;
   disabled?: boolean;
   fieldErrors?: Record<string, string>;
   onFieldBlur?: (fieldPath: string, value: string | number) => void;
+  onSyncPipeFields?: (fields: PipeFieldSync[]) => Promise<void>;
+  onPersistDraft?: (payload: FormPayloadV1) => Promise<void>;
 } & FieldSyncUiProps;
 
 function BlurGuardTextarea({
@@ -237,6 +256,8 @@ export function ClienteSection({
   disabled,
   fieldErrors,
   onFieldBlur,
+  onSyncPipeFields,
+  onPersistDraft,
   fieldSyncPulse,
   onFieldPulseEnd,
 }: SectionProps) {
@@ -256,7 +277,17 @@ export function ClienteSection({
         <Field fieldKey="cliente.municipio_estado" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Município/Estado" value={c.municipio_estado} disabled={disabled} onChange={(v) => set("municipio_estado", v)} {...syncProps} />
         <Field fieldKey="cliente.inscricao_estadual" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Inscrição estadual" value={c.inscricao_estadual} disabled={disabled} onChange={(v) => set("inscricao_estadual", v)} {...syncProps} />
         <Field fieldKey="cliente.inscricao_municipal" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Inscrição municipal" value={c.inscricao_municipal} disabled={disabled} onChange={(v) => set("inscricao_municipal", v)} {...syncProps} />
-        <Field fieldKey="cliente.codigo_cliente_instalacao" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Código cliente/instalação" value={c.codigo_cliente_instalacao} disabled={disabled} onChange={(v) => set("codigo_cliente_instalacao", v)} {...syncProps} />
+        <CodigoClienteField
+          value={c.codigo_cliente_instalacao}
+          disabled={disabled}
+          fieldErrors={fieldErrors}
+          payload={payload}
+          onChange={onChange}
+          onSyncPipeFields={onSyncPipeFields}
+          onPersistDraft={onPersistDraft}
+          fieldSyncPulse={fieldSyncPulse}
+          onFieldPulseEnd={onFieldPulseEnd}
+        />
       </div>
       <div className="field-grid" style={{ marginTop: "0.75rem" }}>
         <label className={fieldError(fieldErrors, "cliente.endereco") ? "field-has-error" : undefined} style={{ gridColumn: "1 / -1" }}>
@@ -301,43 +332,329 @@ export function ClienteSection({
   );
 }
 
-export function ServicosSection({ payload, onChange, disabled, fieldErrors, onFieldBlur, fieldSyncPulse, onFieldPulseEnd }: SectionProps) {
-  const s = payload.servicos;
-  const setNum = (key: keyof typeof s, raw: string) =>
-    onChange({
-      ...payload,
-      servicos: { ...s, [key]: raw === "" ? 0 : Number(raw) },
-    });
+function CodigoClienteField({
+  value,
+  disabled,
+  fieldErrors,
+  payload,
+  onChange,
+  onSyncPipeFields,
+  onPersistDraft,
+  fieldSyncPulse,
+  onFieldPulseEnd,
+}: {
+  value: string;
+  disabled?: boolean;
+  fieldErrors?: Record<string, string>;
+  payload: FormPayloadV1;
+  onChange: (next: FormPayloadV1) => void;
+  onSyncPipeFields?: (fields: PipeFieldSync[]) => Promise<void>;
+  onPersistDraft?: (payload: FormPayloadV1) => Promise<void>;
+  fieldSyncPulse?: Set<string>;
+  onFieldPulseEnd?: (fieldPath: string) => void;
+}) {
+  const fieldKey = "cliente.codigo_cliente_instalacao";
+  const err = fieldError(fieldErrors, fieldKey);
+  const [draft, setDraft] = useState(() => codigoClienteOnly(value));
+  const [loading, setLoading] = useState(false);
+  const [hubError, setHubError] = useState("");
+  const valueAtFocus = useRef(draft);
 
-  const fields: { key: keyof typeof s; label: string; fieldKey: string }[] = [
-    { key: "sole_web", label: "SOLE Web", fieldKey: "servicos.sole_web" },
-    { key: "sole_consultoria", label: "Sole Consultoria", fieldKey: "servicos.sole_consultoria" },
-    { key: "gestao_acl", label: "Gestão ACL", fieldKey: "servicos.gestao_acl" },
-    { key: "gestao_usina_fotovoltaica", label: "Gestão Usina FV", fieldKey: "servicos.gestao_usina_fotovoltaica" },
-    { key: "gestao_qualidade_energia", label: "Gestão Qualidade Energia", fieldKey: "servicos.gestao_qualidade_energia" },
-    { key: "quantidade_ucs", label: "Quantidade de UC's", fieldKey: "servicos.quantidade_ucs" },
-  ];
+  useEffect(() => {
+    setDraft(codigoClienteOnly(value));
+  }, [value]);
+
+  const loadHub = async (codigoCliente: number) => {
+    setLoading(true);
+    setHubError("");
+    try {
+      const hub = await api.getHubInstalacoes(String(codigoCliente));
+      const next = mergeHubInstalacoes(payload, hub.instalacoes, codigoCliente);
+      onChange(next);
+      await onPersistDraft?.(next);
+      await onSyncPipeFields?.(pipeFieldsFromUcMatrix(next));
+    } catch (e) {
+      setHubError(e instanceof Error ? e.message : "Erro ao carregar instalações HUB");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <label className={err ? "field-has-error" : undefined}>
+      Código cliente
+      <input
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        disabled={disabled || loading}
+        aria-invalid={err ? true : undefined}
+        className={composeFieldClass(fieldKey, {
+          validationError: Boolean(err),
+          fieldSyncPulse,
+        })}
+        onFocus={() => {
+          valueAtFocus.current = draft;
+        }}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={async () => {
+          const trimmed = draft.trim();
+          if (trimmed === valueAtFocus.current.trim()) return;
+          const codigo = Number(trimmed);
+          if (!Number.isFinite(codigo) || codigo <= 0) {
+            setHubError("Informe um código de cliente numérico.");
+            return;
+          }
+          await loadHub(codigo);
+        }}
+        onAnimationEnd={(e) => handleFieldPulseAnimationEnd(e, fieldKey, onFieldPulseEnd)}
+      />
+      {loading && <span className="field-hint">Carregando instalações do HUB…</span>}
+      {hubError && (
+        <span className="field-error-msg" role="alert">
+          {hubError}
+        </span>
+      )}
+      {err && (
+        <span className="field-error-msg" role="alert">
+          {err}
+        </span>
+      )}
+      {value && value.includes("/") && (
+        <span className="field-hint">Pipe: {value}</span>
+      )}
+    </label>
+  );
+}
+
+function UcServicoCelulaField({
+  celula,
+  label,
+  disabled,
+  onToggle,
+  onValorCommit,
+}: {
+  celula: HubServicoItem;
+  label: string;
+  disabled?: boolean;
+  onToggle: () => void;
+  onValorCommit: (valor: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const valueAtFocus = useRef("");
+
+  const shown = editing ? draft : formatMoneyBr(celula.valor);
+
+  return (
+    <div className="uc-servico-celula">
+      <label className="uc-servico-check">
+        <input type="checkbox" checked={celula.ativo} disabled={disabled} onChange={onToggle} />
+        <span className="sr-only">{label}</span>
+      </label>
+      <input
+        type="text"
+        inputMode="decimal"
+        className="uc-servico-valor"
+        value={shown}
+        disabled={disabled || !celula.ativo}
+        aria-label={`Valor ${label}`}
+        onFocus={() => {
+          valueAtFocus.current = moneyToStorage(celula.valor);
+          setDraft(formatMoneyBr(celula.valor) || moneyToStorage(celula.valor));
+          setEditing(true);
+        }}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          const parsed = parseMoneyBr(draft);
+          const stored = parsed !== null ? moneyToStorage(parsed) : moneyToStorage(celula.valor);
+          if (stored !== valueAtFocus.current) onValorCommit(stored);
+        }}
+      />
+    </div>
+  );
+}
+
+export function ServicosSection({
+  payload,
+  onChange,
+  disabled,
+  fieldErrors,
+  onSyncPipeFields,
+  onPersistDraft,
+  fieldSyncPulse,
+}: SectionProps) {
+  const [catalogo, setCatalogo] = useState<HubServicoCatalogo[]>(HUB_SERVICOS_CATALOGO_FALLBACK);
+  const colunas = catalogoOrdenado(catalogo);
+  const instalacoes = getHubInstalacoes(payload, colunas);
+  const { codigoCliente } = parseCodigoClienteInstalacao(payload.cliente.codigo_cliente_instalacao);
+  const [loading, setLoading] = useState(false);
+  const [hubError, setHubError] = useState("");
+  const bootstrapped = useRef(false);
+  const totalHub = somaValoresHub(instalacoes);
+  const ucsAtivas = countUcsAtivas(instalacoes);
+
+  useEffect(() => {
+    api.getHubServicos().then((r) => setCatalogo(r.servicos)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (bootstrapped.current || !codigoCliente || instalacoes.length > 0) return;
+    bootstrapped.current = true;
+    setLoading(true);
+    api
+      .getHubInstalacoes(String(codigoCliente))
+      .then((hub) => {
+        onChange(mergeHubInstalacoes(payload, hub.instalacoes, codigoCliente, colunas));
+      })
+      .catch((e: unknown) => {
+        setHubError(e instanceof Error ? e.message : "Erro ao carregar instalações");
+      })
+      .finally(() => setLoading(false));
+  }, [codigoCliente, colunas, instalacoes.length, onChange, payload]);
+
+  const commitMatrix = async (nextInstalacoes: HubInstalacaoPedido[]) => {
+    if (!codigoCliente) return;
+    const next = applyHubInstalacoes(payload, nextInstalacoes, codigoCliente, colunas);
+    onChange(next);
+    await onPersistDraft?.(next);
+    await onSyncPipeFields?.(pipeFieldsFromUcMatrix(next));
+  };
+
+  const updateCelula = (
+    rowIndex: number,
+    svcIndex: number,
+    patch: Partial<HubServicoItem>,
+  ) =>
+    instalacoes.map((inst, idx) =>
+      idx === rowIndex
+        ? {
+            ...inst,
+            servicos: inst.servicos.map((svc, j) =>
+              j === svcIndex ? { ...svc, ...patch } : svc,
+            ),
+          }
+        : inst,
+    );
 
   return (
     <section className="form-section" aria-labelledby="sec-servicos">
-      <h2 id="sec-servicos">Serviços (UCs)</h2>
-      <div className="field-grid">
-        {fields.map(({ key, label, fieldKey }) => (
-          <Field
-            key={key}
-            fieldKey={fieldKey}
-            fieldErrors={fieldErrors}
-            fieldSyncPulse={fieldSyncPulse}
-            onFieldBlur={onFieldBlur}
-            onFieldPulseEnd={onFieldPulseEnd}
-            label={label}
-            type="number"
-            value={s[key]}
-            disabled={disabled}
-            onChange={(v) => setNum(key, v)}
-          />
-        ))}
-      </div>
+      <h2 id="sec-servicos">UC × serviço × valor</h2>
+      <p className="field-hint">
+        Marque o serviço e informe o valor (R$) por UC. No HUB, o valor por UC é a soma dos
+        serviços (pedido_instalacao_extra); os códigos de serviço vão em
+        pedido_instalacao_servico. Só o código cliente/instalação sincroniza no Pipedrive em tempo
+        real.
+      </p>
+      {hubError && <div className="alert error">{hubError}</div>}
+      {loading && <p className="muted">Carregando instalações…</p>}
+      {!codigoCliente && !loading && (
+        <p className="muted">Informe o código cliente na seção Cliente para listar as UCs.</p>
+      )}
+      {codigoCliente && instalacoes.length > 0 && (
+        <>
+          <div className="uc-servicos-wrap">
+            <table className="uc-servicos-table">
+              <thead>
+                <tr>
+                  <th scope="col">UC</th>
+                  <th scope="col">Identificação</th>
+                  <th scope="col">Local</th>
+                  {colunas.map((col) => (
+                    <th key={col.chave} scope="col" className="uc-servicos-th-check">
+                      {col.nome}
+                      <span className="uc-servico-sigla"> ({col.sigla})</span>
+                    </th>
+                  ))}
+                  <th scope="col">Σ UC (extra)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {instalacoes.map((inst, rowIndex) => {
+                  const somaUc = valorUcInstalacao(inst);
+                  return (
+                    <tr key={inst.codigo_instalacao}>
+                      <td>
+                        <strong>{inst.codigo_instalacao}</strong>
+                      </td>
+                      <td>{inst.identificacao || "—"}</td>
+                      <td>{[inst.cidade, inst.uf].filter(Boolean).join(" / ") || "—"}</td>
+                      {inst.servicos.map((svc, svcIndex) => (
+                        <td key={svc.chave} className="uc-servicos-td-check">
+                          <UcServicoCelulaField
+                            celula={svc}
+                            label={`${svc.nome} — UC ${inst.codigo_instalacao}`}
+                            disabled={disabled}
+                            onToggle={() => {
+                              const ativo = !svc.ativo;
+                              void commitMatrix(
+                                updateCelula(rowIndex, svcIndex, {
+                                  ativo,
+                                  valor: ativo ? svc.valor : "",
+                                }),
+                              );
+                            }}
+                            onValorCommit={(valor) => {
+                              void commitMatrix(
+                                updateCelula(rowIndex, svcIndex, {
+                                  ativo: true,
+                                  valor,
+                                }),
+                              );
+                            }}
+                          />
+                        </td>
+                      ))}
+                      <td className="uc-servicos-total">
+                        {somaUc > 0 ? formatMoneyBr(somaUc) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th scope="row" colSpan={3}>
+                    Σ por serviço (R$)
+                  </th>
+                  {colunas.map((col) => (
+                    <td key={col.chave} className="uc-servicos-total">
+                      {formatMoneyBr(sumColunaServico(instalacoes, col.chave)) || "—"}
+                    </td>
+                  ))}
+                  <td />
+                </tr>
+                <tr>
+                  <th scope="row" colSpan={3}>
+                    UCs ativas / valorTotal pedido
+                  </th>
+                  <td colSpan={colunas.length} className="uc-servicos-total">
+                    {ucsAtivas} UC&apos;s · {formatMoneyBr(totalHub) || "R$ 0,00"}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          {payload.hub.observacoes_detalhes && (
+            <label className="uc-hub-preview" style={{ marginTop: "0.75rem" }}>
+              Observações (Detalhes) — preview HUB
+              <textarea
+                readOnly
+                value={payload.hub.observacoes_detalhes}
+                className={composeFieldClass("hub.observacoes_detalhes", { fieldSyncPulse })}
+                rows={3}
+              />
+              {fieldError(fieldErrors, "hub.observacoes_detalhes") && (
+                <span className="field-error-msg" role="alert">
+                  {fieldError(fieldErrors, "hub.observacoes_detalhes")}
+                </span>
+              )}
+            </label>
+          )}
+        </>
+      )}
     </section>
   );
 }
