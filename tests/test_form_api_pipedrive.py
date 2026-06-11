@@ -23,17 +23,50 @@ def test_list_users(client):
         CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),
         CrmUser(id=2, name="Bob", email="bob@gebras.com.br"),
     ]
-    with patch.object(PipedriveCrmReader, "list_users", return_value=mock_users):
+    mock_deals = [
+        CrmDeal(id=746, title="Biview", owner_id=1),
+    ]
+    with (
+        patch.object(PipedriveCrmReader, "list_users", return_value=mock_users),
+        patch.object(
+            PipedriveCrmReader,
+            "list_open_deals_in_contrato_stage",
+            return_value=mock_deals,
+        ),
+    ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 200
-    assert response.json() == [u.to_dict() for u in mock_users]
+    assert response.json() == [mock_users[0].to_dict()]
+
+
+def test_list_users_sem_deals_contrato_retorna_vazio(client):
+    mock_users = [CrmUser(id=1, name="Alice", email="alice@gebras.com.br")]
+    with (
+        patch.object(PipedriveCrmReader, "list_users", return_value=mock_users),
+        patch.object(
+            PipedriveCrmReader,
+            "list_open_deals_in_contrato_stage",
+            return_value=[],
+        ),
+    ):
+        response = client.get("/pipedrive/users")
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_list_users_pipedrive_error(client):
-    with patch.object(
-        PipedriveCrmReader,
-        "list_users",
-        side_effect=CrmReadError("falha pipe"),
+    mock_deals = [CrmDeal(id=746, title="Biview", owner_id=1)]
+    with (
+        patch.object(
+            PipedriveCrmReader,
+            "list_users",
+            side_effect=CrmReadError("falha pipe"),
+        ),
+        patch.object(
+            PipedriveCrmReader,
+            "list_open_deals_in_contrato_stage",
+            return_value=mock_deals,
+        ),
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 502
@@ -77,6 +110,10 @@ def test_list_deals_filtra_etapa_contrato_e_owner(mock_get, mock_em_contrato, cl
     assert len(data) == 1
     assert data[0]["id"] == 746
     assert data[0]["owner_id"] == 24587114
+    assert data[0]["portal_stage"] == "Contrato"
+    assert data[0]["operational_label"] == "pendente"
+    assert data[0]["ready_for_form"] is True
+    assert data[0]["ready_for_automation"] is False
     assert mock_get.call_args.kwargs["params"]["owner_id"] == 24587114
     assert mock_get.call_args.kwargs["params"]["status"] == "open"
 

@@ -4,6 +4,14 @@ export type CrmUser = {
   email: string;
 };
 
+export type OperationalLabel =
+  | "pendente"
+  | "rascunho"
+  | "erro"
+  | "enviado"
+  | "processando"
+  | "processado";
+
 export type CrmDeal = {
   id: number;
   title: string;
@@ -11,6 +19,11 @@ export type CrmDeal = {
   stage_id: number | null;
   status: string;
   pipeline_id: number | null;
+  portal_stage?: string;
+  form_status?: string | null;
+  operational_label?: OperationalLabel;
+  ready_for_form?: boolean;
+  ready_for_automation?: boolean;
 };
 
 export type FormPayloadV1 = {

@@ -22,6 +22,8 @@ os.environ["PULAR_HUB"] = "false"
 # Portal: testes usam repositório em memória (sem MySQL real)
 os.environ["PORTAL_DEAL_FORM_REPOSITORY"] = "memory"
 os.environ.setdefault("FORMULARIO_WEB_ENABLED", "true")
+os.environ.setdefault("PORTAL_API_TOKEN", "")
+os.environ.setdefault("PORTAL_STRUCTURED_LOGS", "false")
 
 # config.PLUNE_BRANCH_ID consulta MySQL no import de plune_pedido — mock antes de qualquer import core.*
 _FAKE_FILIAL = {

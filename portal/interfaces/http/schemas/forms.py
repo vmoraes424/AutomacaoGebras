@@ -18,6 +18,15 @@ class FormSubmitIn(FormDraftIn):
     """Mesmo corpo do rascunho; validação de domínio na Fase 4."""
 
 
+class FormSyncFieldIn(BaseModel):
+    field_path: str
+    value: str | int | float | bool | None = None
+    owner_user_id: int | None = None
+    owner_name: str = ""
+    deal_title: str = ""
+    schema_version: str = "v1"
+
+
 class FormRecordOut(BaseModel):
     deal_id: int
     status: str

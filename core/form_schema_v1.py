@@ -171,7 +171,7 @@ def parse_form_payload_v1(payload: dict[str, Any]) -> FormPayloadV1:
 
 
 def form_payload_to_deal_dict(deal_id: int, payload: FormPayloadV1) -> dict[str, Any]:
-    """Converte payload v1 para dict no formato deal Pipedrive (custom_fields por hash)."""
+    """Converte payload v1 para dict deal (custom_fields legíveis — validação interna)."""
     cf: dict[str, Any] = {}
     for path, pipe_hash in FORM_PATH_TO_PIPE.items():
         section, _, field = path.partition(".")

@@ -29,14 +29,25 @@ def test_montar_aviso_inclui_pedidos_plune():
     assert "746" in assunto
 
 
+@patch("core.aviso_comercial.marcar_aviso_comercial_etapa1_enviado")
+@patch("core.aviso_comercial.aviso_comercial_etapa1_ja_enviado", return_value=False)
 @patch("core.aviso_comercial.GraphEmailSender")
 @patch("core.aviso_comercial._graph_configurado", return_value=True)
-def test_enviar_aviso_graph(_mock_graph_cfg, mock_sender_cls):
+def test_enviar_aviso_graph(_mock_graph_cfg, mock_sender_cls, _mock_ja, _mock_marcar):
     sender = MagicMock()
     mock_sender_cls.return_value = sender
     deal = {"id": 1, "title": "T", "custom_fields": {}}
     assert enviar_aviso_comercial_etapa1(deal, {"implantacao": "100"}) is True
     sender.send.assert_called_once()
+
+
+@patch("core.aviso_comercial.aviso_comercial_etapa1_ja_enviado", return_value=True)
+@patch("core.aviso_comercial.GraphEmailSender")
+@patch("core.aviso_comercial._graph_configurado", return_value=True)
+def test_enviar_aviso_nao_repete(_mock_graph_cfg, mock_sender_cls, _mock_ja):
+    deal = {"id": 1, "title": "T", "custom_fields": {}}
+    assert enviar_aviso_comercial_etapa1(deal, {"implantacao": "100"}) is False
+    mock_sender_cls.return_value.send.assert_not_called()
 
 
 @patch("core.aviso_comercial._graph_configurado", return_value=False)

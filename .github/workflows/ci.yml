@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  pytest-portal:
+    name: pytest (portal + form)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run portal/form tests with coverage
+        env:
+          PIPEDRIVE_API_TOKEN: pytest-pipedrive-token
+          CLICKSIGN_ACCESS_TOKEN: pytest-clicksign-token
+          CLICKSIGN_BASE_URL: https://sandbox.clicksign.com/api/v3
+          PLUNE_BASE_URL: https://plune.test.example
+          PLUNE_AUTH_TOKEN: pytest-plune-token
+          PULAR_HUB: "false"
+          PORTAL_DEAL_FORM_REPOSITORY: memory
+          FORMULARIO_WEB_ENABLED: "true"
+          PORTAL_API_TOKEN: ""
+        run: |
+          pytest \
+            tests/test_form_api_contract.py \
+            tests/test_form_api_forms.py \
+            tests/test_form_api_health.py \
+            tests/test_form_api_pipedrive.py \
+            tests/test_form_deal_adapter.py \
+            tests/test_form_hardening_smoke.py \
+            tests/test_form_operational.py \
+            tests/test_form_operational_smoke.py \
+            tests/test_form_persistence.py \
+            tests/test_form_pipe_sync.py \
+            tests/test_form_regression_legacy.py \
+            tests/test_form_rollback.py \
+            tests/test_form_schema_v1.py \
+            tests/test_form_worker_integration.py \
+            tests/test_portal_auth.py \
+            tests/test_portal_pipe_resilience.py \
+            -m "not integration" \
+            --cov \
+            --cov-report=term-missing \
+            -q
+
+  pytest-full:
+    name: pytest (suite completa, sem integration)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run full suite
+        env:
+          PIPEDRIVE_API_TOKEN: pytest-pipedrive-token
+          CLICKSIGN_ACCESS_TOKEN: pytest-clicksign-token
+          CLICKSIGN_BASE_URL: https://sandbox.clicksign.com/api/v3
+          PLUNE_BASE_URL: https://plune.test.example
+          PLUNE_AUTH_TOKEN: pytest-plune-token
+          PULAR_HUB: "false"
+          PORTAL_DEAL_FORM_REPOSITORY: memory
+          FORMULARIO_WEB_ENABLED: "true"
+        run: pytest -m "not integration" -q
+
+  frontend:
+    name: vitest (frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and test
+        run: |
+          npm ci
+          npm test -- --run

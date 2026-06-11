@@ -29,3 +29,5 @@ Fixtures JSON anonimizadas em [`tests/fixtures/formulario_v1/`](../../tests/fixt
 | 3 — Frontend React | ✅ Concluída — ver [fase-3-frontend.md](fase-3-frontend.md) |
 | 4 — Validação de domínio | ✅ Concluída — ver [fase-4-validacao.md](fase-4-validacao.md) |
 | 5 — Integração worker | ✅ Concluída — ver [fase-5-integracao-worker.md](fase-5-integracao-worker.md) |
+| 6 — Fluxo operacional | ✅ Concluída — ver [fase-6-operacional.md](fase-6-operacional.md) |
+| 7 — Hardening e produção | ✅ Concluída — ver [fase-7-hardening.md](fase-7-hardening.md) |

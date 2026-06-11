@@ -18,3 +18,12 @@ class DealFormNotEditableError(FormularioDomainError):
         super().__init__(
             f"Formulário do deal {deal_id} não pode ser editado (status={status})."
         )
+
+
+class DealNotInContratoStageError(FormularioDomainError):
+    def __init__(self, deal_id: int) -> None:
+        self.deal_id = deal_id
+        super().__init__(
+            f"Deal {deal_id} não está aberto na etapa Contrato; "
+            "formulário indisponível."
+        )

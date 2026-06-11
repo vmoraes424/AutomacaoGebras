@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from portal.application.formulario.deal_eligibility import fetch_deal_eligible_for_form
 from portal.domain.formulario.entities import DealForm
 from portal.domain.formulario.repositories import DealFormRepository
 
@@ -20,6 +21,7 @@ class SaveDealFormDraft:
         owner_name: str = "",
         deal_title: str = "",
     ) -> DealForm:
+        fetch_deal_eligible_for_form(deal_id)
         return self._repository.save_draft(
             deal_id,
             payload=payload,

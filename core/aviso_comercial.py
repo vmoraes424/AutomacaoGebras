@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .config import GRAPH_SENDER_EMAIL
+from .database import db_conn
 from .gebras_defaults import EMAIL_COMERCIAL_AUTOMACAO
 from .graph_email_sender import EmailEnvelope, GraphEmailSender
 from .pipedrive_fields import (
@@ -123,6 +124,50 @@ Automação Gebras
     return assunto, corpo_texto, corpo_html
 
 
+def _meta_key_aviso_etapa1(deal_id: str) -> str:
+    return f"aviso_comercial_etapa1:{deal_id}"
+
+
+def aviso_comercial_etapa1_ja_enviado(deal_id: str) -> bool:
+    deal_id = str(deal_id).strip()
+    if not deal_id:
+        return False
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_meta WHERE `key` = %s",
+            (_meta_key_aviso_etapa1(deal_id),),
+        ).fetchone()
+    return bool(row)
+
+
+def marcar_aviso_comercial_etapa1_enviado(deal_id: str) -> None:
+    from datetime import datetime, timezone
+
+    deal_id = str(deal_id).strip()
+    if not deal_id:
+        return
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_meta (`key`, value) VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE value = VALUES(value)
+            """,
+            (_meta_key_aviso_etapa1(deal_id), now),
+        )
+
+
+def limpar_aviso_comercial_etapa1(deal_id: str) -> None:
+    deal_id = str(deal_id).strip()
+    if not deal_id:
+        return
+    with db_conn() as conn:
+        conn.execute(
+            "DELETE FROM app_meta WHERE `key` = %s",
+            (_meta_key_aviso_etapa1(deal_id),),
+        )
+
+
 def _graph_configurado() -> bool:
     return GraphEmailSender.configurado() and bool(GRAPH_SENDER_EMAIL)
 
@@ -137,6 +182,13 @@ def enviar_aviso_comercial_etapa1(
     destino = EMAIL_COMERCIAL_AUTOMACAO
     assunto, _texto, html = montar_aviso_comercial(deal, numeros_pedidos)
     deal_id = str(deal.get("id", "")).strip()
+
+    if aviso_comercial_etapa1_ja_enviado(deal_id):
+        print(
+            f"[*] Deal {deal_id}: aviso comercial já enviado — ignorando reenvio.",
+            flush=True,
+        )
+        return False
 
     if not _graph_configurado():
         print(
@@ -161,6 +213,7 @@ def enviar_aviso_comercial_etapa1(
                 html_body=html,
             )
         )
+        marcar_aviso_comercial_etapa1_enviado(deal_id)
         print(
             f"[v] Deal {deal_id}: aviso informativo enviado para {destino} "
             f"(etapa 1, Microsoft Graph).",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from portal.application.formulario.deal_eligibility import fetch_deal_eligible_for_form
 from portal.domain.formulario.entities import DealForm
 from portal.domain.formulario.exceptions import DealFormNotFoundError
 from portal.domain.formulario.repositories import DealFormRepository
@@ -14,7 +15,7 @@ class OpenDealForm:
     """
     Abre o formulário do deal: rascunho salvo ou bootstrap a partir do Pipedrive.
 
-    Campos vazios no rascunho são preenchidos com valores atuais do Pipe.
+    Campos mapeados no rascunho são atualizados com valores atuais do Pipe ao abrir.
     """
 
     def __init__(
@@ -41,15 +42,23 @@ class OpenDealForm:
     ) -> DealForm:
         fetch = self._fetch_deal
         if fetch is None:
-            from core.form_pipe_sync import fetch_deal_for_form
+            fetch = fetch_deal_eligible_for_form
 
-            fetch = fetch_deal_for_form
+        existing = self._repository.get_by_deal_id(deal_id, schema_version=schema_version)
+        if existing is not None and not existing.status.is_editable():
+            return existing
+
+        fetch = self._fetch_deal
+        if fetch is None:
+            fetch = fetch_deal_eligible_for_form
+
         deal_pipe = fetch(deal_id)
         if not deal_pipe:
+            if existing is not None:
+                return existing
             raise DealFormNotFoundError(deal_id)
 
         pipe_payload = self._deal_to_form(deal_pipe)
-        existing = self._repository.get_by_deal_id(deal_id, schema_version=schema_version)
 
         if existing is None:
             return self._repository.save_draft(

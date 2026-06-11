@@ -16,3 +16,8 @@ class PipedriveDealSummary(BaseModel):
     stage_id: int | None = None
     status: str = ""
     pipeline_id: int | None = None
+    portal_stage: str = "Contrato"
+    form_status: str | None = None
+    operational_label: str = "pendente"
+    ready_for_form: bool = True
+    ready_for_automation: bool = False

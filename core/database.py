@@ -1054,6 +1054,11 @@ def limpar_estado_deal(deal_id: str) -> dict[str, int]:
             (deal_id, f"{deal_id}-%"),
         )
         stats["pedidos_plune_keys"] = cur.rowcount
+        cur = conn.execute(
+            "DELETE FROM app_meta WHERE `key` = %s",
+            (f"aviso_comercial_etapa1:{deal_id}",),
+        )
+        stats["aviso_comercial"] = cur.rowcount
     return stats
 
 

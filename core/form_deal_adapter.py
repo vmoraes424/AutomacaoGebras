@@ -17,8 +17,11 @@ from core.form_schema_v1 import form_payload_to_deal_dict, parse_form_payload_v1
 
 # Status prontos para automacao (submit ja validou dominio na Fase 4)
 FORM_STATUS_READY_FOR_WORKER = frozenset(
-    {"validated", "processing", "processed"}
+    {"validated", "submitted", "processing", "processed"}
 )
+
+# Fila do worker: só formulário recém-enviado (processing/processed ficam fora)
+FORM_STATUS_WORKER_QUEUE = frozenset({"validated", "submitted"})
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,60 @@ def merge_form_into_deal(deal_pipe: dict[str, Any], form_payload: dict[str, Any]
     return merged
 
 
+def listar_deal_ids_formulario_aguardando_worker(
+    *,
+    exclude_deal_ids: set[str] | None = None,
+    schema_version: str = "v1",
+) -> list[int]:
+    """Deals com formulário enviado aguardando processamento no worker."""
+    from core.database import db_conn
+
+    exclude = exclude_deal_ids or set()
+    statuses = tuple(sorted(FORM_STATUS_WORKER_QUEUE))
+    placeholders = ", ".join(["%s"] * len(statuses))
+    with db_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT df.deal_id
+            FROM deal_forms df
+            LEFT JOIN deals_processed dp ON dp.deal_id = CAST(df.deal_id AS CHAR)
+            WHERE df.schema_version = %s
+              AND df.status IN ({placeholders})
+              AND dp.deal_id IS NULL
+            ORDER BY df.submitted_at IS NULL, df.submitted_at ASC, df.updated_at ASC
+            """,
+            (schema_version, *statuses),
+        ).fetchall()
+    out: list[int] = []
+    for row in rows:
+        deal_id = str(row["deal_id"])
+        if deal_id not in exclude:
+            out.append(int(row["deal_id"]))
+    return out
+
+
+def atualizar_deal_form_status(
+    deal_id: int | str,
+    status: str,
+    *,
+    schema_version: str = "v1",
+) -> None:
+    from datetime import datetime, timezone
+
+    from core.database import db_conn
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with db_conn() as conn:
+        conn.execute(
+            """
+            UPDATE deal_forms
+            SET status = %s, updated_at = %s
+            WHERE deal_id = %s AND schema_version = %s
+            """,
+            (status, now, int(deal_id), schema_version),
+        )
+
+
 def preparar_deal_para_automacao(
     deal_pipe: dict[str, Any],
     *,
@@ -90,11 +147,10 @@ def preparar_deal_para_automacao(
     form_loader=None,
 ) -> PrepareDealResult:
     """
-    Resolve o deal usado pelo worker.
+    Resolve o deal usado pelo worker (merge form > Pipe).
 
-    - Flag desligada: deal Pipe inalterado (legado).
-    - Flag ligada + form validated: merge form > Pipe.
-    - Flag ligada + sem form validated: skipped_reason (worker nao processa).
+    O worker só enfileira deals via `listar_deal_ids_formulario_aguardando_worker`;
+    `formulario_web_enabled=False` permanece apenas para testes/rollback do adaptador.
     """
     enabled = FORMULARIO_WEB_ENABLED if formulario_web_enabled is None else formulario_web_enabled
     if not enabled:

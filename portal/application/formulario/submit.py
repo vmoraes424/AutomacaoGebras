@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from portal.application.formulario.deal_eligibility import fetch_deal_eligible_for_form
 from portal.domain.formulario.entities import DealForm
 from portal.domain.formulario.repositories import DealFormRepository
 from portal.domain.formulario.value_objects import FormStatus
@@ -39,6 +40,9 @@ class SubmitDealForm:
         owner_name: str = "",
         deal_title: str = "",
     ) -> DealForm:
+        pipe_deal = fetch_deal_eligible_for_form(deal_id)
+        if not deal_title.strip():
+            deal_title = str(pipe_deal.get("title") or "")
         validation_errors = self._validator(deal_id, payload)
         form = self._repository.submit(
             deal_id,
@@ -56,4 +60,10 @@ class SubmitDealForm:
                 from core.form_pipe_sync import push_form_to_pipedrive
 
                 push_form_to_pipedrive(deal_id, payload)
+            try:
+                from core.form_pipe_sync import notificar_formulario_enviado_pipedrive
+
+                notificar_formulario_enviado_pipedrive(deal_id)
+            except Exception:
+                pass
         return form

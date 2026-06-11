@@ -26,6 +26,18 @@ class MemoryDealFormRepository:
         form = self._store.get(self._key(deal_id, schema_version))
         return deepcopy(form) if form else None
 
+    def list_form_status_by_deal_ids(
+        self, deal_ids: list[int], *, schema_version: str = "v1"
+    ) -> dict[int, str]:
+        wanted = {int(d) for d in deal_ids}
+        out: dict[int, str] = {}
+        for key, form in self._store.items():
+            if not key.endswith(f":{schema_version}"):
+                continue
+            if form.deal_id in wanted:
+                out[form.deal_id] = str(form.status)
+        return out
+
     def save_draft(
         self,
         deal_id: int,

@@ -1,7 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { CrmDeal } from "../api/types";
+import type { CrmDeal, OperationalLabel } from "../api/types";
+
+const LABEL_TEXT: Record<OperationalLabel, string> = {
+  pendente: "Pendente",
+  rascunho: "Rascunho",
+  erro: "Erro de validação",
+  enviado: "Enviado",
+  processando: "Processando",
+  processado: "Processado",
+};
+
+function dealLabel(deal: CrmDeal): OperationalLabel {
+  return deal.operational_label ?? "pendente";
+}
 
 export function DealListPage() {
   const { ownerId } = useParams<{ ownerId: string }>();
@@ -27,6 +40,8 @@ export function DealListPage() {
       <h1>Meus cards — {ownerName || `usuário ${ownerId}`}</h1>
       <p className="muted">
         <Link to="/">← Trocar consultor</Link>
+        {" · "}
+        Etapa: <strong>Contrato</strong> (abertos)
       </p>
 
       {loading && <p>Carregando cards…</p>}
@@ -36,21 +51,32 @@ export function DealListPage() {
         <p className="muted">Nenhum card aberto na etapa Contrato para este dono.</p>
       )}
 
-      {deals.map((deal) => (
-        <div key={deal.id} className="card">
-          <strong>
-            #{deal.id} — {deal.title}
-          </strong>
-          <div className="muted">Status: {deal.status}</div>
-          <Link
-            className="button"
-            to={`/deals/${ownerId}/${deal.id}/form`}
-            state={{ ownerName, dealTitle: deal.title }}
-          >
-            Preencher formulário
-          </Link>
-        </div>
-      ))}
+      {deals.map((deal) => {
+        const label = dealLabel(deal);
+        return (
+          <div key={deal.id} className="card">
+            <div className="card-header">
+              <strong>
+                #{deal.id} — {deal.title}
+              </strong>
+              <span className={`badge badge-${label}`}>{LABEL_TEXT[label]}</span>
+            </div>
+            <div className="muted">
+              Status Pipe: {deal.status}
+              {deal.ready_for_automation && " · Pronto para automação"}
+            </div>
+            <Link
+              className="button"
+              to={`/deals/${ownerId}/${deal.id}/form`}
+              state={{ ownerName, dealTitle: deal.title }}
+            >
+              {label === "enviado" || label === "processando" || label === "processado"
+                ? "Ver formulário"
+                : "Preencher formulário"}
+            </Link>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -19,10 +19,16 @@ export function OwnerSelectPage() {
   return (
     <div className="layout">
       <h1>Portal Gebras — Selecione o consultor</h1>
-      <p className="muted">Escolha o dono dos cards para listar negócios na etapa Contrato.</p>
+      <p className="muted">
+        Apenas consultores com cards abertos na etapa Contrato aparecem aqui.
+      </p>
 
-      {loading && <p>Carregando usuários…</p>}
+      {loading && <p>Carregando consultores…</p>}
       {error && <div className="alert error">{error}</div>}
+
+      {!loading && !error && users.length === 0 && (
+        <p className="muted">Nenhum consultor com cards abertos na etapa Contrato.</p>
+      )}
 
       {!loading &&
         users.map((user) => (

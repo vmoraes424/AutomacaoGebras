@@ -57,6 +57,63 @@ FIELD_INSCRICAO_ESTADUAL = "c3e623cfa197040b778400a8977ae2c8a8386024"
 FIELD_PERCENTUAL_EXITO = "225005fe8384d97183e5480781ea8ea82982301e"
 FIELD_OBSERVACOES_DETALHES = "4fba2f9323c64acdcac770e38f2c0cdb840796bc"
 
+# Tipos Pipedrive v2 relevantes na escrita (PATCH custom_fields)
+PIPE_FIELDS_SET = frozenset(
+    {
+        FIELD_EMAIL_CONSULTOR_GEBRAS,
+        FIELD_EMAIL_COORDENADOR_GEBRAS,
+        FIELD_EMAIL_DIRETOR_GEBRAS,
+    }
+)
+PIPE_FIELDS_ENUM = frozenset(
+    {
+        FIELD_FILIAL,
+        FIELD_REGIONAL,
+        FIELD_SUBCENTRO_NIVEL_3,
+        FIELD_PERCENTUAL_EXITO,
+    }
+)
+PIPE_FIELDS_ADDRESS = frozenset({FIELD_ENDERECO, FIELD_CIDADE})
+PIPE_FIELDS_MONETARY = frozenset({FIELD_VALOR_MENSAL, FIELD_VALOR_IMPLANTACAO})
+PIPE_FIELDS_NUMERIC = frozenset((*CAMPOS_SERVICO_UC, FIELD_QUANTIDADE_UCS))
+PIPE_FIELDS_DATE = frozenset(
+    {FIELD_DATA_PAGAMENTO_IMPLANTACAO, FIELD_DATA_PRIMEIRA_COBRANCA}
+)
+DEFAULT_PIPE_CURRENCY = "BRL"
+
+
+def parse_decimal_brl(valor) -> float | None:
+    """Interpreta valor monetário em notação BR (1.805,50 / 5.000 / 1805)."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return None
+    normalizado = texto.replace("R$", "").replace(" ", "")
+    if "," in normalizado and "." in normalizado:
+        if normalizado.rfind(",") > normalizado.rfind("."):
+            normalizado = normalizado.replace(".", "").replace(",", ".")
+        else:
+            normalizado = normalizado.replace(",", "")
+    elif "," in normalizado:
+        normalizado = normalizado.replace(".", "").replace(",", ".")
+    elif "." in normalizado:
+        partes = normalizado.split(".")
+        if len(partes) > 1 and all(re.fullmatch(r"\d+", p) for p in partes):
+            if len(partes[-1]) == 3:
+                normalizado = "".join(partes)
+    try:
+        return float(normalizado)
+    except ValueError:
+        return None
+
+
+def monetary_value_for_pipe(valor) -> dict[str, float | str]:
+    """Formato PATCH v2 para custom field monetary."""
+    numero = parse_decimal_brl(valor)
+    if numero is None:
+        raise ValueError(f"Valor monetário inválido: {valor!r}")
+    return {"value": numero, "currency": DEFAULT_PIPE_CURRENCY}
+
+
 # Ordem Clicksign: Consultor → Coordenador → Cliente → Diretor.
 # papel = rótulo nos logs; nome_clicksign = name na API (2+ palavras).
 # Grupo 1 Consultor; comercial recebe e-mail informativo separado (aviso_comercial).
@@ -213,6 +270,50 @@ def _enum_option_labels_for_field(field_code: str) -> dict[str, str]:
             if not cursor:
                 break
     return _enum_option_labels.get(field_code, {})
+
+
+def warm_deal_field_options_cache() -> None:
+    """Pre-carrega catálogo enum/set do Pipedrive (evita latência no 1º blur)."""
+    if _enum_option_labels is not None:
+        return
+    _enum_option_labels_for_field(FIELD_FILIAL)
+
+
+def _label_to_option_id(field_code: str, label: str) -> str | None:
+    texto = str(label or "").strip()
+    if not texto:
+        return None
+    options = _enum_option_labels_for_field(field_code)
+    for opt_id, opt_label in options.items():
+        if opt_label.strip().casefold() == texto.casefold():
+            return str(opt_id)
+    if texto in options:
+        return str(texto)
+    return None
+
+
+def option_ids_for_set_field(field_code: str, label_text: str) -> list[int]:
+    """Converte rótulo(s) do formulário em ids para campo set/multi-option (API v2)."""
+    partes = [p.strip() for p in str(label_text or "").split(",") if p.strip()]
+    if not partes:
+        return []
+    ids: list[int] = []
+    for parte in partes:
+        opt_id = _label_to_option_id(field_code, parte)
+        if opt_id is None:
+            raise ValueError(
+                f"Opção «{parte}» não encontrada nas opções do campo Pipedrive."
+            )
+        ids.append(int(opt_id))
+    return ids
+
+
+def option_id_for_enum_field(field_code: str, label: str) -> int | None:
+    """Converte rótulo do formulário em id de opção única (enum)."""
+    opt_id = _label_to_option_id(field_code, label)
+    if opt_id is None:
+        return None
+    return int(opt_id)
 
 
 def get_enum_label(deal_data: dict, field_code: str) -> str:

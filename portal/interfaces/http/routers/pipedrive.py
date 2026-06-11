@@ -24,9 +24,6 @@ def list_deals(
     c: PortalContainer = Depends(container),
 ) -> list[dict]:
     try:
-        return [
-            deal.to_dict()
-            for deal in c.list_deals_contrato.execute(owner_user_id=owner_user_id)
-        ]
+        return c.list_deals_enriched.execute(owner_user_id=owner_user_id)
     except CrmReadError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

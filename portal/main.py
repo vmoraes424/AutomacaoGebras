@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from portal.interfaces.http.middleware.auth import PortalAuthMiddleware
+from portal.interfaces.http.middleware.request_logging import RequestLoggingMiddleware
 from portal.interfaces.http.routers import forms, health, pipedrive
 
 
@@ -12,8 +14,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Gebras Portal API",
         description="API do formulário web — DDD pragmático (formulario + crm)",
-        version="0.2.0",
+        version="0.3.0",
     )
+    app.add_middleware(PortalAuthMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

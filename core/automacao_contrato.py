@@ -25,17 +25,21 @@ from core.config import (
     CLICKSIGN_RATE_LIMIT_BUFFER_SEC,
     CLICKSIGN_RATE_LIMIT_MAX_RETRIES,
     DEV_PULAR_CLICKSIGN,
+    DEV_HUB_SEM_APROVACAO_PLUNE,
+    AUTOMACAO_WORKER_ENABLED,
     FORMULARIO_WEB_ENABLED,
     INTERVALO_POLLING_SEGUNDOS,
     MODELO_DOCX,
     PASTA_SAIDA,
     PIPEDRIVE_API_TOKEN,
-    CORTE_TEMPORAL_GRACE_MINUTOS,
-    TESTE_PLUNE_SEM_ASSINATURA,
-    DEV_HUB_SEM_APROVACAO_PLUNE,
     PULAR_HUB,
+    TESTE_PLUNE_SEM_ASSINATURA,
 )
-from core.form_deal_adapter import preparar_deal_para_automacao
+from core.form_deal_adapter import (
+    atualizar_deal_form_status,
+    listar_deal_ids_formulario_aguardando_worker,
+    preparar_deal_para_automacao,
+)
 from core.database import (
     carregar_deals_processados,
     garantir_envelope_para_hub,
@@ -59,18 +63,12 @@ from core.plune_pedido import (
     formatar_linha_pedidos_plune_contrato,
     obter_numeros_pedidos_plune_deal,
 )
-from core.pipedrive_stages import (
-    deal_esta_em_etapa_contrato,
-    marcar_deal_como_ganho,
-)
+from core.pipedrive_stages import marcar_deal_como_ganho, deal_elegivel_formulario_contrato
 from core.pipedrive_validations import (
     DealValidationError,
-    notificar_validacao_aprovada,
     reabrir_deal_com_erros,
     reabrir_deal_falha_automacao,
-    validar_deal_para_automacao,
 )
-from core.gebras_defaults import PIPEDRIVE_STAGE_CONTRATO_NOME
 from core.pipedrive_fields import (
     FIELD_CONTATO_CONTRATANTE,
     FIELD_CONTATO_FINANCEIRO,
@@ -101,28 +99,28 @@ from core.pipedrive_fields import (
     get_cidade_estado,
     get_contato_gestor_contrato,
     get_val,
+    buscar_deal_por_id,
 )
 from core.pipedrive_files import baixar_docx_contrato_padrao_deal
 from core.aviso_comercial import enviar_aviso_comercial_etapa1
+from core.gebras_defaults import EMAIL_COMERCIAL_AUTOMACAO
 
 # --- CONFIGURAÇÕES (ver config.py) ---
 API_TOKEN = PIPEDRIVE_API_TOKEN
 
-# Corte temporal (UTC) por update_time do deal na etapa Contrato
-DATA_INICIO_SCRIPT: datetime | None = None
-
 # Evita repetir o mesmo aviso sobre linha legada em deals_processados a cada ciclo
 _deals_legado_ja_avisados: set[str] = set()
-# Uma anotação de validação OK por deal (a nota altera update_time e não deve repetir na regeneração)
-_deals_validacao_aprovada_avisados: set[str] = set()
 
 
-def inicializar_corte_temporal() -> datetime:
-    """UTC: update_time do deal deve ser >= este instante (com margem antes do arranque)."""
-    global DATA_INICIO_SCRIPT
-    agora = datetime.now(timezone.utc)
-    DATA_INICIO_SCRIPT = agora - timedelta(minutes=CORTE_TEMPORAL_GRACE_MINUTOS)
-    return DATA_INICIO_SCRIPT
+def _registrar_deal_processado_worker(deal_id: str, evento_str: str) -> None:
+    salvar_deal_processado(deal_id, evento_str)
+    try:
+        atualizar_deal_form_status(deal_id, "processed")
+    except Exception as exc:
+        print(
+            f"[!] Deal {deal_id}: falha ao marcar formulário como processed: {exc}",
+            flush=True,
+        )
 
 
 # ---------- GERENCIAMENTO DE ESTADO ----------
@@ -830,41 +828,6 @@ def _salvar_template_deal_local(
     return caminho
 
 
-# ---------- NOVO FLUXO: POLLING DA API ----------
-def buscar_deals_etapa_contrato():
-    """Lista deals abertos na etapa Contrato (API v2), com paginação por cursor."""
-    url = "https://api.pipedrive.com/api/v2/deals"
-    headers = {"x-api-token": API_TOKEN}
-    deals: list[dict] = []
-    cursor: str | None = None
-
-    try:
-        while True:
-            params: dict = {"status": "open", "limit": 500}
-            if cursor:
-                params["cursor"] = cursor
-            response = requests.get(url, params=params, headers=headers, timeout=60)
-            if response.status_code != 200:
-                print(
-                    f"[!] Erro ao buscar deals: {response.status_code} - {response.text}"
-                )
-                return deals
-            body = response.json()
-            page = body.get("data") or []
-            if isinstance(page, dict):
-                page = [page]
-            for deal in page:
-                if deal_esta_em_etapa_contrato(deal):
-                    deals.append(deal)
-            cursor = (body.get("additional_data") or {}).get("next_cursor")
-            if not cursor:
-                break
-        return deals
-    except Exception as e:
-        print(f"[!] Falha na conexão com Pipedrive: {e}")
-        return deals
-
-
 def _fluxo_hub_pre_aprovacao(
     deal_id: str,
     parceiro_criado_plune: bool,
@@ -992,44 +955,50 @@ def _retomar_fluxo_interrompido(registro: dict | None) -> bool:
     ainda não foi gravado (falha parcial ou queda do processo).
 
     Poll com deal já em deals_processed é ignorado antes deste ponto.
-    Para reprocessar do zero: `automacao_db rm deal <id>` e mover o card para Contrato.
+    Para reprocessar do zero: `automacao_db rm deal <id>` e reenviar o formulário.
     """
     return registro is not None
 
 
 def processar_deals_pendentes():
-    """Função principal executada a cada ciclo do loop."""
-    limpar_templates_orfaos_runtime()
-    deals = buscar_deals_etapa_contrato()
-    if not deals:
+    """Processa deals enfileirados pelo formulário web (deal_forms validated/submitted)."""
+    if not AUTOMACAO_WORKER_ENABLED:
         print(
-            f"[*] Pipedrive: nenhum deal aberto na etapa "
-            f"«{PIPEDRIVE_STAGE_CONTRATO_NOME}» (ou erro acima).",
+            "[*] AUTOMACAO_WORKER_ENABLED=0 — worker de formulário desligado "
+            "(sem Plune/contrato/e-mail comercial).",
+            flush=True,
+        )
+        return
+    if not FORMULARIO_WEB_ENABLED:
+        print(
+            "[*] FORMULARIO_WEB_ENABLED=0 — worker de formulário desligado.",
+            flush=True,
+        )
+        return
+    limpar_templates_orfaos_runtime()
+    ids_processados, ids_legado = carregar_deals_processados()
+    deal_ids = listar_deal_ids_formulario_aguardando_worker(
+        exclude_deal_ids=ids_processados | ids_legado
+    )
+    if not deal_ids:
+        print(
+            "[*] Formulário web: nenhum deal validated aguardando automação.",
             flush=True,
         )
         return
 
-    ids_processados, ids_legado = carregar_deals_processados()
-    n_contrato = len(deals)
-    n_sem_evento = n_legado = n_dup = n_data = n_corte = 0
+    n_sem_deal = n_fechado = n_fora_contrato = n_legado = n_dup = n_sem_evento = n_data = 0
     algum_processado = False
 
-    for deal in deals:
-        deal_id = str(deal.get("id"))
-        evento_str = deal.get("update_time") or deal.get("add_time")
-
-        if not evento_str:
-            n_sem_evento += 1
-            continue
+    for deal_id_int in deal_ids:
+        deal_id = str(deal_id_int)
 
         if deal_id in ids_legado:
             n_legado += 1
             if deal_id not in _deals_legado_ja_avisados:
                 _deals_legado_ja_avisados.add(deal_id)
                 print(
-                    f"[*] Deal {deal_id} («{deal.get('title')}») ignorado: está em "
-                    f"deals_legacy_block (MySQL). "
-                    f"Remova a linha «{deal_id}» para reprocessar.",
+                    f"[*] Deal {deal_id}: ignorado — está em deals_legacy_block (MySQL).",
                     flush=True,
                 )
             continue
@@ -1038,10 +1007,38 @@ def processar_deals_pendentes():
             n_dup += 1
             continue
 
+        deal = buscar_deal_por_id(deal_id)
+        if not deal:
+            n_sem_deal += 1
+            print(f"[!] Deal {deal_id}: não encontrado no Pipedrive.", flush=True)
+            continue
+
+        if deal.get("status") != "open":
+            n_fechado += 1
+            print(
+                f"[*] Deal {deal_id}: ignorado — card não está aberto no Pipedrive "
+                f"(status={deal.get('status')!r}).",
+                flush=True,
+            )
+            continue
+
+        if not deal_elegivel_formulario_contrato(deal):
+            n_fora_contrato += 1
+            print(
+                f"[*] Deal {deal_id}: ignorado — card não está na etapa Contrato "
+                f"(stage_id={deal.get('stage_id')!r}).",
+                flush=True,
+            )
+            continue
+
+        evento_str = deal.get("update_time") or deal.get("add_time")
+        if not evento_str:
+            n_sem_evento += 1
+            continue
+
         registro = buscar_por_deal_id(deal_id)
 
-        evento_dt = _parse_deal_timestamp_utc(evento_str)
-        if evento_dt is None:
+        if _parse_deal_timestamp_utc(evento_str) is None:
             n_data += 1
             print(
                 f"[!] Deal {deal_id}: update_time em formato não reconhecido: {evento_str!r}",
@@ -1049,15 +1046,19 @@ def processar_deals_pendentes():
             )
             continue
 
-        if DATA_INICIO_SCRIPT is not None and evento_dt < DATA_INICIO_SCRIPT:
-            n_corte += 1
-            continue
-
         print(
-            f"\n[!] DEAL NA ETAPA CONTRATO — automação disparada! "
+            f"\n[!] FORMULÁRIO ENVIADO — automação disparada! "
             f"Deal ID: {deal_id} | Título: {deal.get('title')}",
             flush=True,
         )
+
+        try:
+            atualizar_deal_form_status(deal_id, "processing")
+        except Exception as exc:
+            print(
+                f"[!] Deal {deal_id}: falha ao marcar formulário como processing: {exc}",
+                flush=True,
+            )
 
         prep = preparar_deal_para_automacao(
             deal, formulario_web_enabled=FORMULARIO_WEB_ENABLED
@@ -1067,73 +1068,31 @@ def processar_deals_pendentes():
                 f" (status={prep.form_status})" if prep.form_status else ""
             )
             print(
-                f"[*] Deal {deal_id}: ignorado — {prep.skipped_reason}{status_info}. "
-                "Com FORMULARIO_WEB_ENABLED=true é necessário formulário validated no portal.",
+                f"[*] Deal {deal_id}: ignorado — {prep.skipped_reason}{status_info}.",
                 flush=True,
             )
             continue
 
         deal = prep.deal
-        if prep.uses_formulario_web:
-            print(
-                f"[*] Deal {deal_id}: usando payload do formulário web (merge form > Pipe).",
-                flush=True,
-            )
+        print(
+            f"[*] Deal {deal_id}: usando payload do formulário web (merge form > Pipe).",
+            flush=True,
+        )
 
         try:
-            # Idempotência: deal em deals_processed é ignorado no início do loop (poll).
+            # Idempotência: deal em deals_processed é ignorado no início do loop.
             # Retomada: envelope_pending sem deals_processed (falha parcial / queda do processo).
-            # Reprocessar do zero: `automacao_db rm deal <id>` e mover o card para Contrato.
+            # Reprocessar do zero: `automacao_db rm deal <id>` e reenviar o formulário.
             if registro and registro.get("pedidos_plune_aprovados"):
                 print(
                     f"[*] Deal {deal_id}: ignorado — pedidos Plune já aprovados "
                     "(regra: sem regeneração após última assinatura).",
                     flush=True,
                 )
-                salvar_deal_processado(deal_id, evento_str)
+                _registrar_deal_processado_worker(deal_id, evento_str)
                 ids_processados.add(deal_id)
                 algum_processado = True
                 continue
-
-            try:
-                if not (FORMULARIO_WEB_ENABLED and prep.uses_formulario_web):
-                    validar_deal_para_automacao(deal)
-            except DealValidationError as validation_error:
-                print(
-                    f"[!] Deal {deal_id}: validação falhou; reabrindo card no Pipedrive.",
-                    flush=True,
-                )
-                for erro in validation_error.mensagens:
-                    print(f"    - {erro}", flush=True)
-                reabrir_deal_com_erros(deal_id, validation_error.mensagens)
-                algum_processado = True
-                print(
-                    f"[v] Deal {deal_id} reaberto no Pipedrive. Não foi gravado no MySQL (deals_processed); "
-                    "após corrigir os campos e mover novamente para Contrato, ele será processado.",
-                    flush=True,
-                )
-                continue
-
-            # Só na 1ª passagem (sem envelope pendente). Regeneração e a própria nota
-            # mudam update_time — não repetir anotação de validação OK.
-            if not registro and deal_id not in _deals_validacao_aprovada_avisados:
-                _deals_validacao_aprovada_avisados.add(deal_id)
-                try:
-                    if notificar_validacao_aprovada(deal_id):
-                        print(
-                            f"[v] Deal {deal_id}: validação OK — anotação registrada no Pipedrive.",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"[*] Deal {deal_id}: validação OK — anotação já existia no Pipedrive.",
-                            flush=True,
-                        )
-                except Exception as exc:
-                    print(
-                        f"[!] Deal {deal_id}: validação OK, mas falha ao notificar Pipedrive: {exc}",
-                        flush=True,
-                    )
 
             # Plune: criar ou retomar (estado em envelopes_pending sem deals_processed)
             numeros_pedidos: dict[str, str] = {}
@@ -1306,7 +1265,7 @@ def processar_deals_pendentes():
                         template_local_path=template_path,
                         parceiro_plune_criado=parceiro_para_envelope,
                     )
-                    salvar_deal_processado(deal_id, evento_str)
+                    _registrar_deal_processado_worker(deal_id, evento_str)
                     ids_processados.add(deal_id)
                     algum_processado = True
                     print(
@@ -1366,7 +1325,7 @@ def processar_deals_pendentes():
                         template_local_path=template_path,
                         parceiro_plune_criado=parceiro_para_envelope,
                     )
-                    salvar_deal_processado(deal_id, evento_str)
+                    _registrar_deal_processado_worker(deal_id, evento_str)
                     ids_processados.add(deal_id)
                     algum_processado = True
                     print(
@@ -1413,19 +1372,23 @@ def processar_deals_pendentes():
 
     if not algum_processado:
         partes = []
+        if n_sem_deal:
+            partes.append(f"{n_sem_deal} deal(s) não encontrados no Pipe")
+        if n_fechado:
+            partes.append(f"{n_fechado} card(s) fechados no Pipe")
+        if n_fora_contrato:
+            partes.append(f"{n_fora_contrato} fora da etapa Contrato")
         if n_sem_evento:
             partes.append(f"{n_sem_evento} sem update_time")
         if n_legado:
-            partes.append(f"{n_legado} bloqueado(s) no arquivo (id só)")
+            partes.append(f"{n_legado} bloqueado(s) em deals_legacy_block")
         if n_dup:
             partes.append(f"{n_dup} deal(s) já processados (deals_processed)")
         if n_data:
             partes.append(f"{n_data} update_time inválido")
-        if n_corte:
-            partes.append(f"{n_corte} antes do corte temporal")
         if partes:
             print(
-                f"[*] Ciclo deals: {', '.join(partes)} — nenhum fluxo novo disparado.",
+                f"[*] Ciclo formulário: {', '.join(partes)} — nenhum fluxo novo disparado.",
                 flush=True,
             )
 
@@ -1528,9 +1491,8 @@ def main():
         os.makedirs(PASTA_SAIDA)
 
     agora_utc = datetime.now(timezone.utc)
-    inicializar_corte_temporal()
 
-    print("--- INICIANDO AUTOMACAO (PIPEDRIVE -> CLICKSIGN -> PLUNE) ---")
+    print("--- INICIANDO AUTOMACAO (FORMULARIO WEB -> CLICKSIGN -> PLUNE) ---")
     print(
         f"[*] Script iniciado em: {formatar_data_hora_brasilia(agora_utc)} "
         f"(horário de Brasília)"
@@ -1539,12 +1501,22 @@ def main():
 
     print(
         f"[*] Estado persistido em MySQL: {MYSQL_HOST}/{MYSQL_DATABASE} "
-        f"(deals, pedidos Plune, envelopes; legado txt/json migrado na 1ª execução)."
+        f"(deal_forms, deals, pedidos Plune, envelopes)."
     )
     print(
-        f"[*] Corte temporal: update_time a partir de "
-        f"{formatar_data_hora_brasilia(DATA_INICIO_SCRIPT)} (Brasília), "
-        f"com margem de {CORTE_TEMPORAL_GRACE_MINUTOS} min antes do arranque."
+        "[*] Gatilho: formulário web enviado (deal_forms validated/submitted) — "
+        "não dispara ao mover o card para Contrato."
+    )
+    if not AUTOMACAO_WORKER_ENABLED:
+        print(
+            "[*] AUTOMACAO_WORKER_ENABLED=0 — fila de formulário desligada "
+            "(sem Plune/contrato/e-mail comercial)."
+        )
+    elif not FORMULARIO_WEB_ENABLED:
+        print("[*] FORMULARIO_WEB_ENABLED=0 — fila de formulário desligada.")
+    print(
+        f"[*] Aviso comercial (etapa 1) → {EMAIL_COMERCIAL_AUTOMACAO} "
+        f"(core/gebras_defaults.py)."
     )
     if TESTE_PLUNE_SEM_ASSINATURA:
         print(
@@ -1561,7 +1533,7 @@ def main():
         )
     elif DEV_HUB_SEM_APROVACAO_PLUNE:
         print(
-            "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune na etapa Contrato "
+            "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune no envio do formulário "
             "(sem esperar aprovação Plune pós-assinatura)."
         )
     print(

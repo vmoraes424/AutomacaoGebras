@@ -35,6 +35,8 @@ describe("DealListPage", () => {
     renderDealList("1");
     expect(await screen.findByText(/Biview/)).toBeInTheDocument();
     expect(screen.getByText(/Outro deal/)).toBeInTheDocument();
+    expect(screen.getByText("Enviado")).toBeInTheDocument();
+    expect(screen.getByText("Pendente")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("owner_user_id=1"), expect.anything());
   });
 

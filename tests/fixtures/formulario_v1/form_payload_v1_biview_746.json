@@ -1,0 +1,50 @@
+{
+  "schema_version": "v1",
+  "cliente": {
+    "contratante": "Selo pedrao de qualidade",
+    "documento": "52398605000186",
+    "endereco": "Rua 1 do lado",
+    "cep": "96040500",
+    "municipio_estado": "Pelotas - RS, Brasil",
+    "inscricao_estadual": "79788989",
+    "inscricao_municipal": "8989",
+    "notas": "Não sei pra que serve",
+    "codigo_cliente_instalacao": "352/1234,3456"
+  },
+  "servicos": {
+    "sole_web": 4,
+    "sole_consultoria": 6,
+    "gestao_acl": 6,
+    "gestao_usina_fotovoltaica": 7,
+    "gestao_qualidade_energia": 9,
+    "quantidade_ucs": 4
+  },
+  "valores": {
+    "valor_recorrencia": "R$ 7.878,78",
+    "valor_implantacao": "R$ 5.000"
+  },
+  "datas": {
+    "data_pagamento_implantacao": "2026-02-24",
+    "data_primeira_cobranca": "2026-02-27"
+  },
+  "comercial": {
+    "filial": "Iribarrem San Martin",
+    "regional": "Regional1",
+    "consultor": "Alinne de Matos Alves",
+    "percentual_exito": "20%"
+  },
+  "signatarios": {
+    "email_assinante_contrato": "pedroterracorrea@hotmail.com",
+    "email_consultor_gebras": "vkbederode@gmail.com",
+    "email_coordenador_gebras": "vinicius.bederode@gebras.com",
+    "email_diretor_gebras": "pedro.terra@gebras.com",
+    "email_financeiro_contratante": "pedroterracorrea@hotmail.com",
+    "email_gestor_contratante": "biview53@gmail.com"
+  },
+  "hub": {
+    "observacoes_detalhes": "UC = 12345648 - SOLE WEB + Gestão ACL - Mercado Livre de Energia= 7.200,00; UC = 54195055 - ACL + Sole Consultoria = 2.000,00"
+  },
+  "anexos": {
+    "proposta_comercial_anexada": false
+  }
+}

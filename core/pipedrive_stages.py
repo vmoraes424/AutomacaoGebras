@@ -1,4 +1,4 @@
-"""Etapas do funil Pipedrive (Contrato dispara automação; ganho pós-assinatura)."""
+"""Etapas do funil Pipedrive (portal lista Contrato; worker dispara via formulário web)."""
 
 from __future__ import annotations
 
@@ -92,6 +92,11 @@ def deal_esta_em_etapa_contrato(deal: dict[str, Any]) -> bool:
         return False
 
 
+def deal_elegivel_formulario_contrato(deal: dict[str, Any]) -> bool:
+    """Card aberto na etapa Contrato (listagem portal + submit + worker)."""
+    return deal.get("status") == "open" and deal_esta_em_etapa_contrato(deal)
+
+
 def _buscar_deal_v2(deal_id: str) -> dict[str, Any]:
     response = requests.get(
         f"https://api.pipedrive.com/api/v2/deals/{deal_id}",
@@ -164,8 +169,44 @@ def garantir_deal_em_etapa_negociacao(deal: dict[str, Any]) -> bool:
 
 
 def garantir_deal_em_etapa_contrato(deal: dict[str, Any]) -> bool:
-    """Garante etapa Contrato (legado; fluxo atual dispara ao entrar em Contrato)."""
+    """Garante etapa Contrato (ex.: card visível no portal antes do envio do formulário)."""
     return _garantir_deal_em_etapa(deal, PIPEDRIVE_STAGE_CONTRATO_NOME)
+
+
+def buscar_deals_etapa_contrato() -> list[dict[str, Any]]:
+    """Lista deals abertos na etapa Contrato (portal/scripts; worker não usa mais este gatilho)."""
+    deals: list[dict[str, Any]] = []
+    cursor: str | None = None
+    try:
+        while True:
+            params: dict[str, str | int] = {"status": "open", "limit": 500}
+            if cursor:
+                params["cursor"] = cursor
+            response = requests.get(
+                "https://api.pipedrive.com/api/v2/deals",
+                headers=_headers(),
+                params=params,
+                timeout=60,
+            )
+            if response.status_code != 200:
+                print(
+                    f"[!] Erro ao buscar deals: {response.status_code} - {response.text}"
+                )
+                return deals
+            body = response.json()
+            page = body.get("data") or []
+            if isinstance(page, dict):
+                page = [page]
+            for deal in page:
+                if deal_esta_em_etapa_contrato(deal):
+                    deals.append(deal)
+            cursor = (body.get("additional_data") or {}).get("next_cursor")
+            if not cursor:
+                break
+        return deals
+    except Exception as e:
+        print(f"[!] Falha na conexão com Pipedrive: {e}")
+        return deals
 
 
 def reverter_deal_para_negociacao(deal_id: str) -> bool:

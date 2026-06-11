@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from core.automacao_contrato import buscar_deals_etapa_contrato
+from core.pipedrive_stages import buscar_deals_etapa_contrato
 
 
-@patch("core.automacao_contrato.deal_esta_em_etapa_contrato")
-@patch("core.automacao_contrato.requests.get")
+@patch("core.pipedrive_stages.deal_esta_em_etapa_contrato")
+@patch("core.pipedrive_stages.requests.get")
 def test_buscar_deals_etapa_contrato_pagina_e_filtra(mock_get, mock_em_contrato):
     mock_em_contrato.side_effect = lambda deal: deal.get("id") in (2, 1052)
 

@@ -32,13 +32,20 @@ def test_fixture_g1_aceito_pelo_backend(client):
         "owner_name": "Consultor Teste",
         "deal_title": "Biview",
     }
-    put = client.put("/forms/746/draft", json=body)
-    assert put.status_code == 200
-    data = put.json()
-    assert data["deal_id"] == 746
-    assert data["payload"]["cliente"]["contratante"] == payload["cliente"]["contratante"]
-    assert data["payload"]["servicos"]["sole_web"] == payload["servicos"]["sole_web"]
+    from unittest.mock import patch
 
-    get = client.get("/forms/746")
-    assert get.status_code == 200
-    assert get.json()["payload"]["hub"]["observacoes_detalhes"] == payload["hub"]["observacoes_detalhes"]
+    with patch("core.form_pipe_sync.fetch_deal_for_form") as mock_fetch:
+        mock_fetch.return_value = {"id": 746, "title": "Biview", "custom_fields": {}}
+        put = client.put("/forms/746/draft", json=body)
+        assert put.status_code == 200
+        data = put.json()
+        assert data["deal_id"] == 746
+        assert data["payload"]["cliente"]["contratante"] == payload["cliente"]["contratante"]
+        assert data["payload"]["servicos"]["sole_web"] == payload["servicos"]["sole_web"]
+
+        get = client.get("/forms/746")
+        assert get.status_code == 200
+        assert (
+            get.json()["payload"]["hub"]["observacoes_detalhes"]
+            == payload["hub"]["observacoes_detalhes"]
+        )

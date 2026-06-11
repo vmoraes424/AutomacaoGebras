@@ -1,0 +1,15 @@
+[run]
+source =
+    portal
+omit =
+    portal/__pycache__/*
+    */tests/*
+
+[report]
+precision = 0
+show_missing = True
+skip_covered = False
+fail_under = 75
+
+[html]
+directory = htmlcov

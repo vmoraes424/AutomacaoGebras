@@ -384,9 +384,11 @@ Criterios de aceite:
 - **100% dos testes legados passam com flag desligada.**
 - Cenarios golden passam com flag ligada.
 
-### Fase 6 - Fluxo Operacional
+### Fase 6 - Fluxo Operacional ✅ CONCLUÍDA
 
 Objetivo: tornar o processo utilizavel no dia a dia.
+
+Ver [`docs/formulario-web/fase-6-operacional.md`](formulario-web/fase-6-operacional.md).
 
 Tarefas:
 
@@ -409,9 +411,11 @@ Criterios de aceite:
 - Automacao so processa cards prontos.
 - Pelo menos um teste de integracao documentado (mesmo que rode so em dev).
 
-### Fase 7 - Hardening E Producao
+### Fase 7 - Hardening E Producao ✅ CONCLUÍDA
 
 Objetivo: preparar para producao sem expandir demais o escopo. Testes unitarios ja devem existir das fases anteriores; aqui consolidamos observabilidade, CI e rollback.
+
+Ver [`docs/formulario-web/fase-7-hardening.md`](formulario-web/fase-7-hardening.md).
 
 Tarefas:
 

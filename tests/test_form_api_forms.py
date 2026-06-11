@@ -20,13 +20,23 @@ def client():
     reset_container()
 
 
-@patch("core.form_pipe_sync.fetch_deal_for_form", return_value=None)
+@pytest.fixture(autouse=True)
+def _deal_aberto_etapa_contrato():
+    """Submit/draft exigem etapa Contrato; testes focam no form, não no Pipe."""
+    with patch(
+        "portal.application.formulario.deal_eligibility.deal_elegivel_formulario_contrato",
+        return_value=True,
+    ):
+        yield
+
+
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form", return_value=None)
 def test_get_form_not_found(_mock_deal, client):
     response = client.get("/forms/746")
     assert response.status_code == 404
 
 
-@patch("core.form_pipe_sync.fetch_deal_for_form")
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
 def test_get_form_bootstraps_do_pipedrive(mock_buscar, client):
     deal = json.loads(
         (
@@ -45,9 +55,14 @@ def test_get_form_bootstraps_do_pipedrive(mock_buscar, client):
     assert data["payload"]["servicos"]["sole_web"] == 4
 
 
-@patch("core.form_pipe_sync.fetch_deal_for_form")
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
 def test_save_and_get_draft(mock_buscar, client):
-    mock_buscar.return_value = {"id": 746, "title": "Biview", "custom_fields": {}}
+    mock_buscar.return_value = {
+        "id": 746,
+        "title": "Biview",
+        "status": "open",
+        "custom_fields": {},
+    }
     payload = {
         "schema_version": "v1",
         "cliente": {"contratante": "Teste Ltda"},
@@ -77,7 +92,7 @@ def test_save_and_get_draft(mock_buscar, client):
     assert status.json()["schema_version"] == "v1"
 
 
-@patch("core.form_pipe_sync.fetch_deal_for_form")
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
 def test_update_draft_preserves_created_at(mock_buscar, client):
     mock_buscar.return_value = {"id": 100, "title": "T", "custom_fields": {}}
     client.put(
@@ -96,7 +111,11 @@ def test_update_draft_preserves_created_at(mock_buscar, client):
 
 
 @patch("core.form_pipe_sync.push_form_to_pipedrive")
-def test_submit_incompleto_retorna_error_com_validation_errors(_sync, client):
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
+def test_submit_incompleto_retorna_error_com_validation_errors(
+    mock_buscar, _sync, client
+):
+    mock_buscar.return_value = {"id": 746, "title": "T", "status": "open", "custom_fields": {}}
     body = {
         "payload": {"cliente": {"contratante": "Enviado"}},
         "schema_version": "v1",
@@ -129,6 +148,10 @@ def test_submit_g1_validado(client):
         patch("core.pipedrive_validations.filial_tem_mapeamento", return_value=True),
         patch("core.pipedrive_validations.resolver_branch_id", return_value="751"),
         patch("core.form_pipe_sync.push_form_to_pipedrive"),
+        patch(
+            "portal.application.formulario.deal_eligibility.fetch_deal_for_form",
+            return_value={"id": 746, "title": "G1", "status": "open", "custom_fields": {}},
+        ),
     ]
     for p in patches:
         p.start()
@@ -145,7 +168,9 @@ def test_submit_g1_validado(client):
 
 
 @patch("core.form_pipe_sync.push_form_to_pipedrive")
-def test_draft_after_submit_returns_409(_sync, client):
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
+def test_draft_after_submit_returns_409(mock_buscar, _sync, client):
+    mock_buscar.return_value = {"id": 800, "title": "T", "status": "open", "custom_fields": {}}
     import json
     from pathlib import Path
     from unittest.mock import patch
@@ -163,6 +188,10 @@ def test_draft_after_submit_returns_409(_sync, client):
         patch("core.form_validation_v1.resolver_subcentro", return_value="1"),
         patch("core.pipedrive_validations.filial_tem_mapeamento", return_value=True),
         patch("core.pipedrive_validations.resolver_branch_id", return_value="751"),
+        patch(
+            "portal.application.formulario.deal_eligibility.fetch_deal_for_form",
+            return_value={"id": 800, "title": "T", "status": "open", "custom_fields": {}},
+        ),
     ]
     for p in patches:
         p.start()
@@ -173,3 +202,32 @@ def test_draft_after_submit_returns_409(_sync, client):
             p.stop()
     response = client.put("/forms/800/draft", json=body)
     assert response.status_code == 409
+
+
+@patch("core.form_pipe_sync.push_form_to_pipedrive")
+@patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
+def test_sync_pipedrive(mock_fetch, mock_push, client):
+    mock_fetch.return_value = {"id": 746, "title": "T", "status": "open", "custom_fields": {}}
+    body = {
+        "payload": {"schema_version": "v1", "cliente": {"contratante": "Sync Teste"}},
+        "schema_version": "v1",
+    }
+    response = client.post("/forms/746/sync-pipedrive", json=body)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deal_id"] == 746
+    assert data["synced"] is True
+    mock_push.assert_called_once_with(746, body["payload"])
+
+
+@patch("core.form_pipe_sync.sync_form_field_to_pipedrive", return_value=True)
+def test_sync_field_pipedrive(mock_sync_field, client):
+    response = client.post(
+        "/forms/746/sync-field",
+        json={"field_path": "cliente.contratante", "value": "Novo Nome"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["field_path"] == "cliente.contratante"
+    assert data["synced"] is True
+    mock_sync_field.assert_called_once_with(746, "cliente.contratante", "Novo Nome")
