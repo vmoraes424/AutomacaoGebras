@@ -198,6 +198,30 @@ def normalize_hub_payload(payload: dict[str, Any]) -> dict[str, Any]:
     hub["valor_total"] = _valor_decimal_str(total) or str(hub.get("valor_total") or "")
     hub["observacoes_detalhes"] = build_observacoes_detalhes_hub(hub["instalacoes"])
     data["hub"] = hub
+
+    cliente = dict(data.get("cliente") or {})
+    codigo_raw = str(cliente.get("codigo_cliente_instalacao") or "").strip()
+    if codigo_raw and hub["instalacoes"]:
+        from core.pipedrive_fields import (
+            format_codigo_cliente_instalacao,
+            parse_codigo_cliente_instalacao,
+        )
+
+        try:
+            codigo_cliente, _ = parse_codigo_cliente_instalacao(codigo_raw)
+        except ValueError:
+            codigo_cliente = 0
+        if codigo_cliente > 0:
+            codigos = sorted(
+                int(i["codigo_instalacao"])
+                for i in hub["instalacoes"]
+                if i.get("codigo_instalacao") and instalacao_tem_servico(i)
+            )
+            cliente["codigo_cliente_instalacao"] = format_codigo_cliente_instalacao(
+                codigo_cliente, codigos
+            )
+            data["cliente"] = cliente
+
     return data
 
 

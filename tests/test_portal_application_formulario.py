@@ -27,12 +27,15 @@ def repo():
 
 
 def test_save_and_get_draft_use_case(repo):
+    from core.form_uc_hub import normalize_hub_payload
+
     save = SaveDealFormDraft(repo)
     get = GetDealForm(repo)
 
-    save.execute(746, payload={"a": 1}, schema_version="v1")
+    raw = {"a": 1}
+    save.execute(746, payload=raw, schema_version="v1")
     form = get.execute(746)
-    assert form.payload == {"a": 1}
+    assert form.payload == normalize_hub_payload(raw)
     assert form.status.value == "draft"
 
 

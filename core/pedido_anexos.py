@@ -11,12 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .automacao_config import get_automacao_config
 from .config import (
     CLICKSIGN_ACCESS_TOKEN,
     CLICKSIGN_BASE_URL,
-    DEV_PULAR_CLICKSIGN,
     PASTA_SAIDA,
-    TESTE_PLUNE_SEM_ASSINATURA,
 )
 from .envelope_state import buscar_por_deal_id
 from .pipedrive_files import baixar_pdf_proposta_deal
@@ -229,8 +228,9 @@ def anexar_contrato_pedido(
     cache: CacheAnexosDeal | None = None,
 ) -> dict | None:
     if permitir_docx_local is None:
+        cfg = get_automacao_config()
         permitir_docx_local = bool(
-            TESTE_PLUNE_SEM_ASSINATURA or DEV_PULAR_CLICKSIGN
+            cfg.teste_plune_sem_assinatura or cfg.dev_pular_clicksign
         )
     deal_id = str(deal_id).strip()
     try:

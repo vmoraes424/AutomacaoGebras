@@ -8,16 +8,30 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
+from core.automacao_config import (
+    AutomacaoConfig,
+    get_automacao_config,
+    reset_automacao_config_for_tests,
+    save_automacao_config,
+)
 from core.automacao_contrato import processar_deals_pendentes
-from core.config import _env_bool
 from core.form_deal_adapter import DealFormSnapshot, preparar_deal_para_automacao
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "formulario_v1"
 
 
-def test_rollback_flag_lida_do_ambiente(monkeypatch):
-    monkeypatch.setenv("FORMULARIO_WEB_ENABLED", "false")
-    assert _env_bool("FORMULARIO_WEB_ENABLED", True) is False
+def test_rollback_flag_desliga_formulario_web():
+    reset_automacao_config_for_tests()
+    save_automacao_config(
+        AutomacaoConfig(
+            dev_pular_clicksign=False,
+            teste_plune_sem_assinatura=False,
+            dev_hub_sem_aprovacao_plune=False,
+            pular_hub=False,
+            formulario_web_enabled=False,
+        )
+    )
+    assert get_automacao_config(force_refresh=True).formulario_web_enabled is False
 
 
 def test_rollback_adaptador_ignora_form():
@@ -33,13 +47,16 @@ def test_rollback_adaptador_ignora_form():
     assert result.deal == pipe
 
 
-@patch("core.automacao_contrato.FORMULARIO_WEB_ENABLED", False)
+@patch(
+    "core.automacao_contrato.get_automacao_config",
+    return_value=AutomacaoConfig(formulario_web_enabled=False),
+)
 @patch(
     "core.automacao_contrato.listar_deal_ids_formulario_aguardando_worker",
     return_value=[999001],
 )
 @patch("core.automacao_contrato.buscar_deal_por_id")
-def test_rollback_worker_ignora_fila_form_rapido(mock_buscar, _listar):
+def test_rollback_worker_ignora_fila_form_rapido(_cfg, mock_buscar, _listar):
     started = time.perf_counter()
     processar_deals_pendentes()
     elapsed = time.perf_counter() - started

@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.automacao_config import AutomacaoConfig
 from core.form_deal_adapter import merge_form_into_deal
 from core.form_schema_v1 import parse_form_payload_v1
 from core.form_uc_hub import apply_hub_instalacoes
@@ -198,7 +199,10 @@ def _hub_patches(*, deal: dict, cursor: RecordingCursor):
     mock_conn.__exit__ = MagicMock(return_value=False)
 
     return (
-        patch("core.hub_pedido.PULAR_HUB", False),
+        patch(
+            "core.hub_pedido.get_automacao_config",
+            return_value=AutomacaoConfig(pular_hub=False),
+        ),
         patch("core.hub_pedido.HUB_CODIGO_USUARIO_SISTEMA", -3),
         patch("core.hub_pedido.buscar_por_deal_id", return_value={}),
         patch("core.hub_pedido.buscar_deal_por_id", return_value=deal),
@@ -387,7 +391,10 @@ class TestCriarPedidoHubMysqlStaging:
 
         codigo_pedido: int | None = None
         patches = (
-            patch("core.hub_pedido.PULAR_HUB", False),
+            patch(
+            "core.hub_pedido.get_automacao_config",
+            return_value=AutomacaoConfig(pular_hub=False),
+        ),
             patch("core.hub_pedido.HUB_CODIGO_USUARIO_SISTEMA", -3),
             patch("core.hub_pedido.buscar_por_deal_id", return_value={}),
             patch("core.hub_pedido.buscar_deal_por_id", return_value=merged),

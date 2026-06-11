@@ -82,14 +82,7 @@ GRAPH_TENANT_ID = _env("tenant_id")
 GRAPH_CLIENT_ID = _env("client_id")
 GRAPH_CLIENT_SECRET = _env("client_secret")
 GRAPH_SENDER_EMAIL = _env("email")
-DEV_PULAR_CLICKSIGN = _env_bool("DEV_PULAR_CLICKSIGN", False)
-TESTE_PLUNE_SEM_ASSINATURA = _env_bool("TESTE_PLUNE_SEM_ASSINATURA", True)
-# true = cria pedido HUB logo após pedidos Plune no ganho (sem esperar aprovação pós-Clicksign)
-DEV_HUB_SEM_APROVACAO_PLUNE = _env_bool("DEV_HUB_SEM_APROVACAO_PLUNE", False)
-# true = não cria pedido no HUB (atualizações e validações continuam)
-PULAR_HUB = _env_bool("PULAR_HUB", False)
-# true = adaptador mescla deal_forms no worker; false = só testes/rollback do adaptador
-FORMULARIO_WEB_ENABLED = _env_bool("FORMULARIO_WEB_ENABLED", True)
+# Flags operacionais da automação: core/automacao_config.py (MySQL automacao_config, portal /config/automacao)
 # false = worker não processa fila (Plune/contrato/Clicksign/e-mail comercial); loop continua só pós-assinatura
 AUTOMACAO_WORKER_ENABLED = _env_bool("AUTOMACAO_WORKER_ENABLED", True)
 

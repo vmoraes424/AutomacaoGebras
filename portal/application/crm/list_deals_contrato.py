@@ -8,7 +8,8 @@ class ListDealsContrato:
     def __init__(self, crm_reader: CrmReader) -> None:
         self._crm_reader = crm_reader
 
-    def execute(self, *, owner_user_id: int | None = None) -> list[CrmDeal]:
+    def execute(self, *, owner_user_id: int | None = None, fresh: bool = False) -> list[CrmDeal]:
         return self._crm_reader.list_open_deals_in_contrato_stage(
-            owner_user_id=owner_user_id
+            owner_user_id=owner_user_id,
+            fresh=fresh,
         )

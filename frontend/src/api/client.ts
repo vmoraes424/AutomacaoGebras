@@ -1,25 +1,56 @@
 import type {
   CrmDeal,
   CrmUser,
+  AutomacaoConfig,
+  FormAttachmentsMeta,
   FormDraftBody,
+  FormReadiness,
   FormRecord,
   HubInstalacoesResponse,
   HubServicosResponse,
 } from "./types";
+import {
+  fetchWithApiCache,
+  hasApiCache,
+  invalidateApiCache,
+  peekApiCache,
+  resetApiClientCachesForTests as resetRequestCacheForTests,
+} from "./requestCache";
+import { configAuthHeaders } from "../utils/configAuth";
+
+export { hasApiCache, peekApiCache, invalidateApiCache };
+
+export function resetApiClientCachesForTests(): void {
+  resetRequestCacheForTests();
+  inflightGetForm.clear();
+}
+
+async function configRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  return request<T>(path, {
+    ...init,
+    headers: {
+      ...(init?.headers as Record<string, string> | undefined),
+      ...configAuthHeaders(),
+    },
+  });
+}
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 const inflightGetForm = new Map<string, Promise<FormRecord>>();
 
-/** Limpa deduplicação entre testes Vitest. */
-export function resetApiClientCachesForTests(): void {
-  inflightGetForm.clear();
-}
+async function request<T>(path: string, init?: RequestInit & { fresh?: boolean }): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined),
+  };
+  if (init?.fresh) {
+    headers["X-Portal-Fresh"] = "1";
+  }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
+    headers,
   });
   const contentType = response.headers?.get?.("content-type") ?? "";
 
@@ -40,13 +71,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function cacheKey(path: string) {
+  return path;
+}
+
 export const api = {
-  listUsers: () => request<CrmUser[]>("/pipedrive/users"),
+  listUsers: (opts?: { fresh?: boolean }) =>
+    fetchWithApiCache(
+      cacheKey("/pipedrive/users"),
+      () => request<CrmUser[]>("/pipedrive/users", { fresh: opts?.fresh ?? true }),
+      opts,
+    ),
 
-  listDeals: (ownerUserId: number) =>
-    request<CrmDeal[]>(`/pipedrive/deals?owner_user_id=${ownerUserId}`),
+  listDeals: (ownerUserId: number, opts?: { fresh?: boolean }) =>
+    fetchWithApiCache(
+      cacheKey(`/pipedrive/deals?owner_user_id=${ownerUserId}`),
+      () =>
+        request<CrmDeal[]>(`/pipedrive/deals?owner_user_id=${ownerUserId}`, {
+          fresh: opts?.fresh ?? true,
+        }),
+      opts,
+    ),
 
-  getHubServicos: () => request<HubServicosResponse>("/hub/servicos"),
+  getHubServicos: (opts?: { fresh?: boolean }) =>
+    fetchWithApiCache(
+      cacheKey("/hub/servicos"),
+      () => request<HubServicosResponse>("/hub/servicos", { fresh: opts?.fresh ?? false }),
+      opts,
+    ),
 
   getHubInstalacoes: (codigoClienteInstalacao: string) =>
     request<HubInstalacoesResponse>(
@@ -74,17 +126,37 @@ export const api = {
     return promise;
   },
 
-  saveDraft: (dealId: number, body: FormDraftBody) =>
-    request<FormRecord>(`/forms/${dealId}/draft`, {
+  saveDraft: (dealId: number, body: FormDraftBody) => {
+    invalidateApiCache("/pipedrive/deals");
+    return request<FormRecord>(`/forms/${dealId}/draft`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }),
+    });
+  },
 
-  submitForm: (dealId: number, body: FormDraftBody) =>
-    request<FormRecord>(`/forms/${dealId}/submit`, {
+  getFormReadiness: (dealId: number, body: FormDraftBody) =>
+    request<FormReadiness>(`/forms/${dealId}/readiness`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  getFormAttachments: (dealId: number, opts?: { fresh?: boolean }) =>
+    fetchWithApiCache(
+      cacheKey(`/forms/${dealId}/attachments`),
+      () =>
+        request<FormAttachmentsMeta>(`/forms/${dealId}/attachments`, {
+          fresh: opts?.fresh ?? false,
+        }),
+      opts,
+    ),
+
+  submitForm: (dealId: number, body: FormDraftBody) => {
+    invalidateApiCache("/pipedrive/deals");
+    return request<FormRecord>(`/forms/${dealId}/submit`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
 
   syncToPipedrive: (dealId: number, body: FormDraftBody) =>
     request<{ deal_id: number; synced: boolean; message: string }>(
@@ -115,4 +187,20 @@ export const api = {
         }),
       },
     ),
+  getAutomacaoConfigAccess: () =>
+    request<{ password_required: boolean }>("/config/automacao/access"),
+
+  getAutomacaoConfig: () => configRequest<AutomacaoConfig>("/config/automacao"),
+
+  saveAutomacaoConfig: (body: AutomacaoConfig) =>
+    configRequest<AutomacaoConfig>("/config/automacao", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  applyAutomacaoDevPreset: () =>
+    configRequest<AutomacaoConfig>("/config/automacao/preset/dev", { method: "POST" }),
+
+  applyAutomacaoProdPreset: () =>
+    configRequest<AutomacaoConfig>("/config/automacao/preset/prod", { method: "POST" }),
 };

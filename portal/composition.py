@@ -10,7 +10,9 @@ from portal.application.crm.list_deals_enriched import ListDealsContratoEnriched
 from portal.application.crm.list_users import ListCrmUsers
 from portal.application.hub.list_instalacoes import ListHubInstalacoes
 from portal.application.hub.list_servicos import ListHubServicos
+from portal.application.formulario.get_attachments import GetDealFormAttachments
 from portal.application.formulario.get_deal_form import GetDealForm
+from portal.application.formulario.get_readiness import GetDealFormReadiness
 from portal.application.formulario.get_status import GetDealFormStatus
 from portal.application.formulario.open_deal_form import OpenDealForm
 from portal.application.formulario.save_draft import SaveDealFormDraft
@@ -53,6 +55,8 @@ class PortalContainer:
     sync_deal_form_to_pipedrive: SyncDealFormToPipedrive
     sync_deal_form_field_to_pipedrive: SyncDealFormFieldToPipedrive
     get_deal_form_status: GetDealFormStatus
+    get_deal_form_readiness: GetDealFormReadiness
+    get_deal_form_attachments: GetDealFormAttachments
     list_crm_users: ListCrmUsers
     list_deals_contrato: ListDealsContrato
     list_deals_enriched: ListDealsContratoEnriched
@@ -63,6 +67,7 @@ class PortalContainer:
         repo = self.deal_form_repository
         if isinstance(repo, MemoryDealFormRepository):
             repo.clear()
+        self.crm_reader.invalidate_crm_cache()
 
 
 def build_container() -> PortalContainer:
@@ -88,6 +93,8 @@ def build_container() -> PortalContainer:
         sync_deal_form_to_pipedrive=SyncDealFormToPipedrive(),
         sync_deal_form_field_to_pipedrive=SyncDealFormFieldToPipedrive(deal_form_repository),
         get_deal_form_status=GetDealFormStatus(open_deal_form),
+        get_deal_form_readiness=GetDealFormReadiness(),
+        get_deal_form_attachments=GetDealFormAttachments(),
         list_crm_users=ListCrmUsers(crm_reader),
         list_deals_contrato=ListDealsContrato(crm_reader),
         list_deals_enriched=ListDealsContratoEnriched(

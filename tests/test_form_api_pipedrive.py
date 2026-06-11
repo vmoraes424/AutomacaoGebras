@@ -36,7 +36,39 @@ def test_list_users(client):
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 200
-    assert response.json() == [mock_users[0].to_dict()]
+    assert response.json() == [
+        {
+            "id": 1,
+            "name": "Alice",
+            "email": "alice@gebras.com.br",
+            "deals_contrato_count": 1,
+        }
+    ]
+
+
+def test_list_users_conta_deals_por_consultor(client):
+    mock_users = [
+        CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),
+        CrmUser(id=2, name="Bob", email="bob@gebras.com.br"),
+    ]
+    mock_deals = [
+        CrmDeal(id=746, title="Biview", owner_id=1),
+        CrmDeal(id=747, title="Outro", owner_id=1),
+        CrmDeal(id=800, title="Bob deal", owner_id=2),
+    ]
+    with (
+        patch.object(PipedriveCrmReader, "list_users", return_value=mock_users),
+        patch.object(
+            PipedriveCrmReader,
+            "list_open_deals_in_contrato_stage",
+            return_value=mock_deals,
+        ),
+    ):
+        response = client.get("/pipedrive/users")
+    assert response.status_code == 200
+    by_id = {u["id"]: u for u in response.json()}
+    assert by_id[1]["deals_contrato_count"] == 2
+    assert by_id[2]["deals_contrato_count"] == 1
 
 
 def test_list_users_sem_deals_contrato_retorna_vazio(client):
@@ -70,6 +102,74 @@ def test_list_users_pipedrive_error(client):
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 502
+
+
+def test_x_portal_fresh_header_bypasses_backend_cache(client):
+    """Sem header reutiliza TTL; X-Portal-Fresh: 1 força nova leitura do Pipe."""
+    PipedriveCrmReader.invalidate_crm_cache()
+
+    mock_users = [
+        CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),
+    ]
+    mock_deals = [
+        CrmDeal(id=746, title="Biview", owner_id=1),
+    ]
+    fetch_count = {"users": 0, "deals": 0}
+
+    def fetch_users(_self):
+        fetch_count["users"] += 1
+        return mock_users
+
+    def fetch_deals(_self):
+        fetch_count["deals"] += 1
+        return mock_deals
+
+    with (
+        patch.object(PipedriveCrmReader, "_fetch_users", fetch_users),
+        patch.object(PipedriveCrmReader, "_fetch_all_contrato_deals", fetch_deals),
+    ):
+        assert client.get("/pipedrive/users").status_code == 200
+        assert fetch_count == {"users": 1, "deals": 1}
+
+        assert client.get("/pipedrive/users").status_code == 200
+        assert fetch_count == {"users": 1, "deals": 1}
+
+        assert (
+            client.get("/pipedrive/users", headers={"X-Portal-Fresh": "1"}).status_code == 200
+        )
+        assert fetch_count == {"users": 2, "deals": 2}
+
+    PipedriveCrmReader.invalidate_crm_cache()
+
+
+def test_list_deals_sem_fresh_header_usa_cache(client):
+    PipedriveCrmReader.invalidate_crm_cache()
+
+    mock_deals = [CrmDeal(id=746, title="Biview", owner_id=1)]
+    fetch_count = {"deals": 0}
+
+    def fetch_deals(_self):
+        fetch_count["deals"] += 1
+        return mock_deals
+
+    with patch.object(PipedriveCrmReader, "_fetch_all_contrato_deals", fetch_deals):
+        assert client.get("/pipedrive/deals", params={"owner_user_id": 1}).status_code == 200
+        assert fetch_count["deals"] == 1
+
+        assert client.get("/pipedrive/deals", params={"owner_user_id": 1}).status_code == 200
+        assert fetch_count["deals"] == 1
+
+        assert (
+            client.get(
+                "/pipedrive/deals",
+                params={"owner_user_id": 1},
+                headers={"X-Portal-Fresh": "1"},
+            ).status_code
+            == 200
+        )
+        assert fetch_count["deals"] == 2
+
+    PipedriveCrmReader.invalidate_crm_cache()
 
 
 @patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.deal_esta_em_etapa_contrato")
@@ -114,8 +214,8 @@ def test_list_deals_filtra_etapa_contrato_e_owner(mock_get, mock_em_contrato, cl
     assert data[0]["operational_label"] == "pendente"
     assert data[0]["ready_for_form"] is True
     assert data[0]["ready_for_automation"] is False
-    assert mock_get.call_args.kwargs["params"]["owner_id"] == 24587114
     assert mock_get.call_args.kwargs["params"]["status"] == "open"
+    assert "owner_id" not in mock_get.call_args.kwargs["params"]
 
 
 def test_portal_package_has_no_forbidden_imports():

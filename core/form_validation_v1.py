@@ -13,6 +13,7 @@ from .form_schema_v1 import (
     form_payload_to_deal_dict,
     parse_form_payload_v1,
 )
+from .form_uc_hub import normalize_hub_payload
 from .hub_pedido import erros_validacao_observacoes_hub
 from .pipedrive_fields import (
     CAMPOS_CONTRATO_OBRIGATORIOS,
@@ -48,8 +49,12 @@ def _pydantic_errors(exc: ValidationError) -> dict[str, str]:
 
 def _hub_error_path(message: str) -> str:
     lower = message.lower()
-    if "código cliente" in lower or "instalação" in lower or "instalacao" in lower:
+    if "observações (detalhes)" in lower or "observacoes (detalhes)" in lower:
+        return "servicos.sole_web"
+    if "código cliente" in lower or "codigo cliente" in lower:
         return "cliente.codigo_cliente_instalacao"
+    if "instalação" in lower or "instalacao" in lower:
+        return "servicos.sole_web"
     return "hub.observacoes_detalhes"
 
 
@@ -78,7 +83,7 @@ def _validar_servicos_uc(deal: dict) -> str | None:
     )
 
 
-def _validar_plune(deal: dict, errors: dict[str, str]) -> str:
+def _validar_plune(deal: dict, errors: dict[str, str], *, interactive: bool = False) -> str:
     plune_msgs: list[str] = []
     branch_id = _validar_mapeamento_plune(deal, plune_msgs)
     for msg in plune_msgs:
@@ -102,8 +107,10 @@ def _validar_plune(deal: dict, errors: dict[str, str]) -> str:
     regional = get_enum_label(deal, FIELD_REGIONAL).strip()
     branch_settings = settings_por_branch(branch_id) if branch_id else {}
     if regional and branch_id:
-        sub2_id = resolver_subcentro(branch_id, 2, regional)
-        if not sub2_id:
+        sub2_id = resolver_subcentro(
+            branch_id, 2, regional, sync_if_missing=not interactive
+        )
+        if not sub2_id and not interactive:
             sincronizar_subcentros_de_pedidos(force=True)
             sub2_id = resolver_subcentro(branch_id, 2, regional, sync_if_missing=False)
         if not sub2_id:
@@ -117,8 +124,10 @@ def _validar_plune(deal: dict, errors: dict[str, str]) -> str:
 
     subcentro3 = get_enum_label(deal, FIELD_SUBCENTRO_NIVEL_3).strip()
     if subcentro3 and branch_id:
-        sub3_id = resolver_subcentro(branch_id, 3, subcentro3)
-        if not sub3_id:
+        sub3_id = resolver_subcentro(
+            branch_id, 3, subcentro3, sync_if_missing=not interactive
+        )
+        if not sub3_id and not interactive:
             sincronizar_subcentros_de_pedidos(force=True)
             sub3_id = resolver_subcentro(branch_id, 3, subcentro3, sync_if_missing=False)
         if not sub3_id:
@@ -142,13 +151,23 @@ def _validar_anexo_proposta(payload: FormPayloadV1, errors: dict[str, str]) -> N
         )
 
 
-def validate_form_payload_v1(deal_id: int, payload: dict[str, Any]) -> dict[str, str]:
+def validate_form_payload_v1(
+    deal_id: int,
+    payload: dict[str, Any],
+    *,
+    interactive: bool = False,
+) -> dict[str, str]:
     """
     Valida payload do formulário v1.
 
     Retorna dict vazio se OK; chaves em notação de ponto (ex.: cliente.cep).
+
+    interactive=True (prontidão no portal): só consulta catálogo Plune em cache local,
+    sem sync forçado na API Plune a cada keystroke.
     """
     errors: dict[str, str] = {}
+
+    payload = normalize_hub_payload(payload)
 
     try:
         parsed = parse_form_payload_v1(payload)
@@ -178,11 +197,13 @@ def validate_form_payload_v1(deal_id: int, payload: dict[str, Any]) -> dict[str,
     if servico_msg:
         errors.setdefault("servicos.sole_web", servico_msg)
 
-    _validar_plune(deal, errors)
+    if not interactive:
+        _validar_plune(deal, errors, interactive=False)
 
     for msg in erros_validacao_observacoes_hub(deal):
         errors.setdefault(_hub_error_path(msg), msg)
 
-    _validar_anexo_proposta(parsed, errors)
+    if not interactive:
+        _validar_anexo_proposta(parsed, errors)
 
     return errors

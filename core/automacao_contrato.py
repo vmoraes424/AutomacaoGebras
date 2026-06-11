@@ -19,21 +19,17 @@ from docx.oxml.ns import qn
 from docx.text.run import Run
 from docxtpl import DocxTemplate
 
+from core.automacao_config import get_automacao_config
 from core.config import (
     CLICKSIGN_ACCESS_TOKEN,
     CLICKSIGN_BASE_URL,
     CLICKSIGN_RATE_LIMIT_BUFFER_SEC,
     CLICKSIGN_RATE_LIMIT_MAX_RETRIES,
-    DEV_PULAR_CLICKSIGN,
-    DEV_HUB_SEM_APROVACAO_PLUNE,
     AUTOMACAO_WORKER_ENABLED,
-    FORMULARIO_WEB_ENABLED,
     INTERVALO_POLLING_SEGUNDOS,
     MODELO_DOCX,
     PASTA_SAIDA,
     PIPEDRIVE_API_TOKEN,
-    PULAR_HUB,
-    TESTE_PLUNE_SEM_ASSINATURA,
 )
 from core.form_deal_adapter import (
     atualizar_deal_form_status,
@@ -854,10 +850,11 @@ def _fluxo_hub_pre_aprovacao(
     )
     from core.hub_pedido import tentar_sincronizar_pedido_hub_deal
 
+    cfg = get_automacao_config()
     tentar_sincronizar_pedido_hub_deal(
         deal_id,
         parceiro_plune_criado=parceiro_criado_plune,
-        permitir_criacao=DEV_HUB_SEM_APROVACAO_PLUNE and not PULAR_HUB,
+        permitir_criacao=cfg.dev_hub_sem_aprovacao_plune and not cfg.pular_hub,
     )
 
 
@@ -962,6 +959,7 @@ def _retomar_fluxo_interrompido(registro: dict | None) -> bool:
 
 def processar_deals_pendentes():
     """Processa deals enfileirados pelo formulário web (deal_forms validated/submitted)."""
+    cfg = get_automacao_config()
     if not AUTOMACAO_WORKER_ENABLED:
         print(
             "[*] AUTOMACAO_WORKER_ENABLED=0 — worker de formulário desligado "
@@ -969,7 +967,7 @@ def processar_deals_pendentes():
             flush=True,
         )
         return
-    if not FORMULARIO_WEB_ENABLED:
+    if not cfg.formulario_web_enabled:
         print(
             "[*] FORMULARIO_WEB_ENABLED=0 — worker de formulário desligado.",
             flush=True,
@@ -1061,7 +1059,7 @@ def processar_deals_pendentes():
             )
 
         prep = preparar_deal_para_automacao(
-            deal, formulario_web_enabled=FORMULARIO_WEB_ENABLED
+            deal, formulario_web_enabled=cfg.formulario_web_enabled
         )
         if prep.skipped_reason:
             status_info = (
@@ -1239,14 +1237,14 @@ def processar_deals_pendentes():
             if doc_path:
 
                 def _apos_contrato_dev_sem_envelope_msg():
-                    if not TESTE_PLUNE_SEM_ASSINATURA:
+                    if not cfg.teste_plune_sem_assinatura:
                         print(
                             f"[*] Pós-assinatura: com DEV_PULAR_CLICKSIGN não há envelope para aprovar depois. "
                             f"Use TESTE_PLUNE_SEM_ASSINATURA=true em dev ou desligue o pulo para criar envelope.",
                             flush=True,
                         )
 
-                if DEV_PULAR_CLICKSIGN:
+                if cfg.dev_pular_clicksign:
                     print(
                         f"    -> [DEV] DEV_PULAR_CLICKSIGN=1 — contrato gravado em «{doc_path}»; "
                         f"API Clicksign não será chamada.",
@@ -1340,7 +1338,7 @@ def processar_deals_pendentes():
                             flush=True,
                         )
 
-                    if not TESTE_PLUNE_SEM_ASSINATURA:
+                    if not cfg.teste_plune_sem_assinatura:
                         print(
                             f"[*] Pós-assinatura: quando o envelope fechar, os pedidos Plune serão aprovados. "
                             f"Pendências de envelope no MySQL (envelopes_pending).",
@@ -1395,7 +1393,7 @@ def processar_deals_pendentes():
 
 def processar_contratos_assinados():
     """Quando o envelope Clicksign fechou (todos assinaram), aprova os pedidos no Plune."""
-    if TESTE_PLUNE_SEM_ASSINATURA:
+    if get_automacao_config().teste_plune_sem_assinatura:
         return
 
     pendentes = listar_aguardando_pedido_plune()
@@ -1499,6 +1497,7 @@ def main():
     )
     from core.config import MYSQL_DATABASE, MYSQL_HOST
 
+    cfg = get_automacao_config()
     print(
         f"[*] Estado persistido em MySQL: {MYSQL_HOST}/{MYSQL_DATABASE} "
         f"(deal_forms, deals, pedidos Plune, envelopes)."
@@ -1512,26 +1511,26 @@ def main():
             "[*] AUTOMACAO_WORKER_ENABLED=0 — fila de formulário desligada "
             "(sem Plune/contrato/e-mail comercial)."
         )
-    elif not FORMULARIO_WEB_ENABLED:
+    elif not cfg.formulario_web_enabled:
         print("[*] FORMULARIO_WEB_ENABLED=0 — fila de formulário desligada.")
     print(
         f"[*] Aviso comercial (etapa 1) → {EMAIL_COMERCIAL_AUTOMACAO} "
         f"(core/gebras_defaults.py)."
     )
-    if TESTE_PLUNE_SEM_ASSINATURA:
+    if cfg.teste_plune_sem_assinatura:
         print(
             "[*] MODO TESTE: pedido Plune logo após Clicksign (processar_contratos_assinados fica em silêncio de propósito)."
         )
-    if DEV_PULAR_CLICKSIGN:
+    if cfg.dev_pular_clicksign:
         print(
             "[*] DEV_PULAR_CLICKSIGN=1 — a API Clicksign não é chamada (só gera o .docx no disco; use com TESTE_PLUNE_SEM_ASSINATURA em dev para ir ao Plune)."
         )
-    if PULAR_HUB:
+    if cfg.pular_hub:
         print(
             "[*] PULAR_HUB=1 — criação de pedido no HUB desligada "
             "(atualizações e validações HUB continuam)."
         )
-    elif DEV_HUB_SEM_APROVACAO_PLUNE:
+    elif cfg.dev_hub_sem_aprovacao_plune:
         print(
             "[*] DEV_HUB_SEM_APROVACAO_PLUNE=1 — pedido HUB após Plune no envio do formulário "
             "(sem esperar aprovação Plune pós-assinatura)."

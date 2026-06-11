@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.automacao_config import AutomacaoConfig
 from core.automacao_contrato import processar_deals_pendentes
 from core.form_deal_adapter import DealFormSnapshot
 
@@ -84,8 +85,11 @@ def test_form_ausente_no_adaptador_nao_chama_plune(_load, mock_plune, _fill):
     mock_plune.assert_not_called()
 
 
-@patch("core.automacao_contrato.FORMULARIO_WEB_ENABLED", True)
-def test_form_validated_usa_merge_e_processa():
+@patch(
+    "core.automacao_contrato.get_automacao_config",
+    return_value=AutomacaoConfig(formulario_web_enabled=True, dev_pular_clicksign=True),
+)
+def test_form_validated_usa_merge_e_processa(_cfg):
     from contextlib import ExitStack
 
     with ExitStack() as stack:
@@ -113,7 +117,6 @@ def test_form_validated_usa_merge_e_processa():
         stack.enter_context(
             patch("core.automacao_contrato.baixar_docx_contrato_padrao_deal", return_value=None)
         )
-        stack.enter_context(patch("core.automacao_contrato.DEV_PULAR_CLICKSIGN", True))
         stack.enter_context(
             patch("core.automacao_contrato._registrar_deal_processado_worker")
         )
@@ -124,13 +127,16 @@ def test_form_validated_usa_merge_e_processa():
     assert str(mock_plune.call_args[0][0]) == "999001"
 
 
-@patch("core.automacao_contrato.FORMULARIO_WEB_ENABLED", False)
+@patch(
+    "core.automacao_contrato.get_automacao_config",
+    return_value=AutomacaoConfig(formulario_web_enabled=False),
+)
 @patch(
     "core.automacao_contrato.listar_deal_ids_formulario_aguardando_worker",
     return_value=[999001],
 )
 @patch("core.automacao_contrato.buscar_deal_por_id")
-def test_flag_off_worker_nao_consume_fila_form(mock_buscar, _listar):
+def test_flag_off_worker_nao_consume_fila_form(_cfg, mock_buscar, _listar):
     processar_deals_pendentes()
     mock_buscar.assert_not_called()
 

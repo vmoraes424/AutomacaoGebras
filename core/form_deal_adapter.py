@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from core.config import FORMULARIO_WEB_ENABLED
+from core.automacao_config import get_automacao_config
 from core.form_schema_v1 import form_payload_to_deal_dict, parse_form_payload_v1
 
 # Status prontos para automacao (submit ja validou dominio na Fase 4)
@@ -152,7 +152,11 @@ def preparar_deal_para_automacao(
     O worker só enfileira deals via `listar_deal_ids_formulario_aguardando_worker`;
     `formulario_web_enabled=False` permanece apenas para testes/rollback do adaptador.
     """
-    enabled = FORMULARIO_WEB_ENABLED if formulario_web_enabled is None else formulario_web_enabled
+    enabled = (
+        get_automacao_config().formulario_web_enabled
+        if formulario_web_enabled is None
+        else formulario_web_enabled
+    )
     if not enabled:
         return PrepareDealResult(deal=deepcopy(deal_pipe), source="pipe")
 

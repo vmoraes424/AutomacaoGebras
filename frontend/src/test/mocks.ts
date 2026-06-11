@@ -10,6 +10,7 @@ export const mockDeals: CrmDeal[] = [
   {
     id: 746,
     title: "Biview",
+    cliente: "Biview Energia Ltda",
     owner_id: 1,
     stage_id: 7,
     status: "open",
@@ -23,6 +24,7 @@ export const mockDeals: CrmDeal[] = [
   {
     id: 999,
     title: "Outro deal",
+    cliente: "Cliente Exemplo SA",
     owner_id: 1,
     stage_id: 7,
     status: "open",

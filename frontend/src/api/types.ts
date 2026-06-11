@@ -2,6 +2,7 @@ export type CrmUser = {
   id: number;
   name: string;
   email: string;
+  deals_contrato_count: number;
 };
 
 export type OperationalLabel =
@@ -15,6 +16,7 @@ export type OperationalLabel =
 export type CrmDeal = {
   id: number;
   title: string;
+  cliente?: string;
   owner_id: number | null;
   stage_id: number | null;
   status: string;
@@ -177,4 +179,67 @@ export type FormDraftBody = {
   owner_user_id?: number | null;
   owner_name?: string;
   deal_title?: string;
+};
+
+export type FormReadinessItemStatus = "ok" | "pending" | "error" | "info";
+
+export type FormReadinessItem = {
+  id: string;
+  label: string;
+  status: FormReadinessItemStatus;
+  message?: string | null;
+};
+
+export type FormReadinessSection = {
+  id: string;
+  label: string;
+  completed: number;
+  total: number;
+  ready: boolean;
+  /** Anexos Pipe ainda carregando (GET /attachments). */
+  loading?: boolean;
+  items: FormReadinessItem[];
+};
+
+export type FormContratoMeta = {
+  source: "padrao" | "custom";
+  filename: string | null;
+  label: string;
+};
+
+export type FormAttachmentsMeta = {
+  deal_id: number;
+  proposta_comercial_anexada: boolean;
+  contrato: FormContratoMeta;
+  error?: string | null;
+};
+
+export type FormReadiness = {
+  deal_id: number;
+  ready_to_submit: boolean;
+  summary: {
+    completed: number;
+    total: number;
+    percent: number;
+    validation_error_count: number;
+  };
+  sections: FormReadinessSection[];
+  contrato?: FormContratoMeta;
+  attachments?: {
+    proposta_comercial_anexada: boolean;
+    error?: string | null;
+  };
+  /** true enquanto anexos Pipe não foram mesclados na UI. */
+  attachments_deferred?: boolean;
+  validation_errors: Record<string, string>;
+};
+
+export type AutomacaoConfig = {
+  dev_pular_clicksign: boolean;
+  teste_plune_sem_assinatura: boolean;
+  dev_hub_sem_aprovacao_plune: boolean;
+  pular_hub: boolean;
+  formulario_web_enabled: boolean;
+  updated_at?: string | null;
+  mysql_database?: string | null;
 };

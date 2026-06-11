@@ -13,10 +13,9 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
+from .automacao_config import get_automacao_config
 from .config import (
     ARQUIVO_AVISOS_APROVACAO_PLUNE,
-    DEV_PULAR_CLICKSIGN,
-    TESTE_PLUNE_SEM_ASSINATURA,
     PLUNE_AUTH_TOKEN,
     PLUNE_BASE_URL,
     PLUNE_BRANCH_ID,
@@ -886,9 +885,9 @@ def vincular_pedidos_plune_implantacao_recorrente(
 
 def anexar_contrato_local_aos_pedidos_deal(deal_id: str) -> None:
     """Remove contrato antigo e anexa o .docx local após fill_contract (dev/teste)."""
-    from .config import DEV_PULAR_CLICKSIGN, TESTE_PLUNE_SEM_ASSINATURA
+    cfg = get_automacao_config()
 
-    if not (TESTE_PLUNE_SEM_ASSINATURA or DEV_PULAR_CLICKSIGN):
+    if not (cfg.teste_plune_sem_assinatura or cfg.dev_pular_clicksign):
         return
     deal_id = str(deal_id).strip()
     cache = CacheAnexosDeal(deal_id, permitir_docx_local=True)
@@ -1783,7 +1782,8 @@ def criar_pedido_plune(deal_id: str, *, anexar_contrato: bool | None = None) -> 
         raise PluneError(f"Deal {deal_id} sem CNPJ no Pipedrive")
 
     if anexar_contrato is None:
-        anexar_contrato_dev = bool(TESTE_PLUNE_SEM_ASSINATURA or DEV_PULAR_CLICKSIGN)
+        cfg = get_automacao_config()
+        anexar_contrato_dev = bool(cfg.teste_plune_sem_assinatura or cfg.dev_pular_clicksign)
     else:
         anexar_contrato_dev = anexar_contrato
     cache = CacheAnexosDeal(deal_id, permitir_docx_local=anexar_contrato_dev)

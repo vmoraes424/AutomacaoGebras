@@ -1,82 +1,94 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { DealCard } from "../components/DealCard";
+import { GebrasLoader } from "../components/GebrasLoader";
+import type { CrmDeal } from "../api/types";
 import { api } from "../api/client";
-import type { CrmDeal, OperationalLabel } from "../api/types";
-
-const LABEL_TEXT: Record<OperationalLabel, string> = {
-  pendente: "Pendente",
-  rascunho: "Rascunho",
-  erro: "Erro de validação",
-  enviado: "Enviado",
-  processando: "Processando",
-  processado: "Processado",
-};
-
-function dealLabel(deal: CrmDeal): OperationalLabel {
-  return deal.operational_label ?? "pendente";
-}
+import { useCrmSwr } from "../hooks/useCrmSwr";
+import { useOwnerName } from "../hooks/useOwnerName";
+import { matchesDealFilter } from "../utils/dealFilter";
+import { formatDisplayName } from "../utils/formatDisplayName";
 
 export function DealListPage() {
   const { ownerId } = useParams<{ ownerId: string }>();
   const location = useLocation();
-  const ownerName = (location.state as { ownerName?: string } | null)?.ownerName ?? "";
+  const ownerNameFromNav = (location.state as { ownerName?: string } | null)?.ownerName ?? "";
   const ownerUserId = Number(ownerId);
+  const ownerName = useOwnerName(ownerUserId, ownerNameFromNav);
 
-  const [deals, setDeals] = useState<CrmDeal[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const dealsCacheKey = ownerUserId ? `/pipedrive/deals?owner_user_id=${ownerUserId}` : "";
+  const fetchDeals = useMemo(
+    () => (opts?: { fresh?: boolean }) => api.listDeals(ownerUserId, opts),
+    [ownerUserId],
+  );
+  const { data: deals, loading, error } = useCrmSwr<CrmDeal[]>(
+    dealsCacheKey,
+    fetchDeals,
+    [],
+  );
+  const [filter, setFilter] = useState("");
 
-  useEffect(() => {
-    if (!ownerUserId) return;
-    api
-      .listDeals(ownerUserId)
-      .then(setDeals)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [ownerUserId]);
+  const filteredDeals = useMemo(
+    () => deals.filter((deal) => matchesDealFilter(deal, filter)),
+    [deals, filter],
+  );
+
+  const displayOwner = ownerName ? formatDisplayName(ownerName) : `usuário ${ownerId}`;
+
+  if (!ownerUserId) {
+    return null;
+  }
 
   return (
     <div className="layout">
-      <h1>Meus cards — {ownerName || `usuário ${ownerId}`}</h1>
-      <p className="muted">
-        <Link to="/">← Trocar consultor</Link>
-        {" · "}
-        Etapa: <strong>Contrato</strong> (abertos)
-      </p>
+      <header className="page-header">
+        <h1>Meus cards — {displayOwner}</h1>
+        <p className="muted">
+          <Link to="/">← Trocar consultor</Link>
+          {" · "}
+          Etapa: <strong>Contrato</strong> (abertos)
+        </p>
+      </header>
 
-      {loading && <p>Carregando cards…</p>}
+      {loading && <GebrasLoader variant="cards" label="Carregando cards…" />}
       {error && <div className="alert error">{error}</div>}
 
       {!loading && deals.length === 0 && !error && (
         <p className="muted">Nenhum card aberto na etapa Contrato para este dono.</p>
       )}
 
-      {deals.map((deal) => {
-        const label = dealLabel(deal);
-        return (
-          <div key={deal.id} className="card">
-            <div className="card-header">
-              <strong>
-                #{deal.id} — {deal.title}
-              </strong>
-              <span className={`badge badge-${label}`}>{LABEL_TEXT[label]}</span>
-            </div>
-            <div className="muted">
-              Status Pipe: {deal.status}
-              {deal.ready_for_automation && " · Pronto para automação"}
-            </div>
-            <Link
-              className="button"
-              to={`/deals/${ownerId}/${deal.id}/form`}
-              state={{ ownerName, dealTitle: deal.title }}
-            >
-              {label === "enviado" || label === "processando" || label === "processado"
-                ? "Ver formulário"
-                : "Preencher formulário"}
-            </Link>
-          </div>
-        );
-      })}
+      {!loading && !error && deals.length > 0 && (
+        <div className="filter-toolbar">
+          <label className="filter-field">
+            Filtrar cards
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="ID, cliente ou nome do card…"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <p className="filter-meta muted" aria-live="polite">
+            {filter
+              ? `${filteredDeals.length} de ${deals.length} card(s)`
+              : `${deals.length} card(s)`}
+          </p>
+        </div>
+      )}
+
+      {!loading && !error && deals.length > 0 && filteredDeals.length === 0 && (
+        <p className="muted">Nenhum card corresponde a «{filter}».</p>
+      )}
+
+      {filteredDeals.length > 0 && (
+        <div className="card-grid">
+          {filteredDeals.map((deal) => (
+            <DealCard key={deal.id} deal={deal} ownerId={ownerId!} ownerName={ownerName} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

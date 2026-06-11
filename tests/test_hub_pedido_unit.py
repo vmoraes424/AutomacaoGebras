@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.automacao_config import AutomacaoConfig
 from core.hub_pedido import (
     HubPedidoError,
     _id_plune_recorrente_para_hub,
@@ -301,7 +302,8 @@ def test_remover_pedido_hub_por_deal_remove():
 
 
 def test_criar_pedido_hub_pula_quando_pular_hub():
-    with patch("core.hub_pedido.PULAR_HUB", True):
+    cfg = AutomacaoConfig(pular_hub=True)
+    with patch("core.hub_pedido.get_automacao_config", return_value=cfg):
         out = criar_pedido_hub("99")
     assert out == {
         "status": "skipped",

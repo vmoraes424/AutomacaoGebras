@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.form_uc_hub import normalize_hub_payload
 from portal.domain.formulario.entities import DealForm
 from portal.domain.formulario.repositories import DealFormRepository
 
@@ -20,6 +21,7 @@ class SaveDealFormDraft:
         owner_name: str = "",
         deal_title: str = "",
     ) -> DealForm:
+        payload = normalize_hub_payload(payload)
         return self._repository.save_draft(
             deal_id,
             payload=payload,

@@ -17,6 +17,7 @@ from typing import Any, Iterator
 
 import pymysql
 
+from .automacao_config import get_automacao_config
 from .config import (
     HUB_CODIGO_USUARIO_SISTEMA,
     MYSQL_DATABASE_HUB,
@@ -24,7 +25,6 @@ from .config import (
     MYSQL_PASSWORD,
     MYSQL_PORT,
     MYSQL_USER,
-    PULAR_HUB,
 )
 from .database import (
     buscar_por_deal_id,
@@ -782,7 +782,7 @@ def criar_pedido_hub(
     ignorar_ja_criado: recria quando o estado local indica pedido mas a linha sumiu no HUB.
     """
     deal_id = str(deal_id).strip()
-    if PULAR_HUB:
+    if get_automacao_config().pular_hub:
         return {
             "status": "skipped",
             "deal_id": deal_id,

@@ -7,11 +7,13 @@ class PipedriveUserOut(BaseModel):
     id: int
     name: str
     email: str = ""
+    deals_contrato_count: int = 0
 
 
 class PipedriveDealSummary(BaseModel):
     id: int
     title: str
+    cliente: str = ""
     owner_id: int | None = None
     stage_id: int | None = None
     status: str = ""

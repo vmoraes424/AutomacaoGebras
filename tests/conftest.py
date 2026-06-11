@@ -17,13 +17,15 @@ os.environ.setdefault("CLICKSIGN_ACCESS_TOKEN", "pytest-clicksign-token")
 os.environ.setdefault("CLICKSIGN_BASE_URL", "https://sandbox.clicksign.com/api/v3")
 os.environ.setdefault("PLUNE_BASE_URL", "https://plune.test.example")
 os.environ.setdefault("PLUNE_AUTH_TOKEN", "pytest-plune-token")
-# .env local pode ter PULAR_HUB=true; testes de criação HUB precisam dela false
-os.environ["PULAR_HUB"] = "false"
-# Portal: testes usam repositório em memória (sem MySQL real)
-os.environ["PORTAL_DEAL_FORM_REPOSITORY"] = "memory"
-os.environ.setdefault("FORMULARIO_WEB_ENABLED", "true")
 os.environ.setdefault("PORTAL_API_TOKEN", "")
 os.environ.setdefault("PORTAL_STRUCTURED_LOGS", "false")
+# pytest: tela de configs aberta (testes de senha sobrescrevem via monkeypatch)
+os.environ["PORTAL_CONFIG_PASSWORD"] = ""
+
+# Portal: testes usam repositório em memória (sem MySQL real)
+os.environ["PORTAL_DEAL_FORM_REPOSITORY"] = "memory"
+# Config da automação: pytest usa memória; produção usa tabela automacao_config no MySQL
+os.environ["AUTOMACAO_CONFIG_BACKEND"] = "memory"
 
 # config.PLUNE_BRANCH_ID consulta MySQL no import de plune_pedido — mock antes de qualquer import core.*
 _FAKE_FILIAL = {

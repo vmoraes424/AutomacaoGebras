@@ -21,6 +21,11 @@ def portal_api_token() -> str:
     return _env("PORTAL_API_TOKEN")
 
 
+def portal_config_password() -> str:
+    """Senha opcional para /config/automacao; vazio = tela aberta sem gate."""
+    return _env("PORTAL_CONFIG_PASSWORD")
+
+
 def portal_deal_form_repository() -> str:
     return _env("PORTAL_DEAL_FORM_REPOSITORY", "mysql")
 

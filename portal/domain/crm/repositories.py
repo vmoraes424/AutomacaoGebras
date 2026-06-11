@@ -6,8 +6,11 @@ from portal.domain.crm.entities import CrmDeal, CrmUser
 
 
 class CrmReader(Protocol):
-    def list_users(self) -> list[CrmUser]: ...
+    def list_users(self, *, fresh: bool = False) -> list[CrmUser]: ...
 
     def list_open_deals_in_contrato_stage(
-        self, *, owner_user_id: int | None = None
+        self,
+        *,
+        owner_user_id: int | None = None,
+        fresh: bool = False,
     ) -> list[CrmDeal]: ...

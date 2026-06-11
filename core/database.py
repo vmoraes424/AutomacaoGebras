@@ -225,6 +225,17 @@ def _init_schema(conn: DbConnection) -> None:
             PRIMARY KEY (deal_id, schema_version)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """,
+        """
+        CREATE TABLE IF NOT EXISTS automacao_config (
+            id TINYINT NOT NULL PRIMARY KEY,
+            dev_pular_clicksign TINYINT(1) NOT NULL DEFAULT 0,
+            teste_plune_sem_assinatura TINYINT(1) NOT NULL DEFAULT 0,
+            dev_hub_sem_aprovacao_plune TINYINT(1) NOT NULL DEFAULT 0,
+            pular_hub TINYINT(1) NOT NULL DEFAULT 0,
+            formulario_web_enabled TINYINT(1) NOT NULL DEFAULT 1,
+            updated_at VARCHAR(64) NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """,
     ]
     for sql in statements:
         try:

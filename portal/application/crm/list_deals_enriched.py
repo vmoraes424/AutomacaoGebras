@@ -22,8 +22,8 @@ class ListDealsContratoEnriched:
         self._list_deals = list_deals
         self._form_repository = form_repository
 
-    def execute(self, *, owner_user_id: int | None = None) -> list[dict]:
-        deals = self._list_deals.execute(owner_user_id=owner_user_id)
+    def execute(self, *, owner_user_id: int | None = None, fresh: bool = False) -> list[dict]:
+        deals = self._list_deals.execute(owner_user_id=owner_user_id, fresh=fresh)
         if not deals:
             return []
         deal_ids = [d.id for d in deals]

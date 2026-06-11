@@ -9,6 +9,7 @@ export default defineConfig({
       "/pipedrive": "http://localhost:8000",
       "/forms": "http://localhost:8000",
       "/hub": "http://localhost:8000",
+      "/config": "http://localhost:8000",
       "/health": "http://localhost:8000",
     },
   },

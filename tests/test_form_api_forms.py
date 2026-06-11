@@ -57,6 +57,8 @@ def test_get_form_bootstraps_do_pipedrive(mock_buscar, client):
 
 @patch("portal.application.formulario.deal_eligibility.fetch_deal_for_form")
 def test_save_and_get_draft(mock_buscar, client):
+    from core.form_uc_hub import normalize_hub_payload
+
     mock_buscar.return_value = {
         "id": 746,
         "title": "Biview",
@@ -67,6 +69,7 @@ def test_save_and_get_draft(mock_buscar, client):
         "schema_version": "v1",
         "cliente": {"contratante": "Teste Ltda"},
     }
+    expected_payload = normalize_hub_payload(payload)
     body = {
         "payload": payload,
         "owner_user_id": 24587114,
@@ -84,7 +87,7 @@ def test_save_and_get_draft(mock_buscar, client):
 
     get = client.get("/forms/746")
     assert get.status_code == 200
-    assert get.json()["payload"] == payload
+    assert get.json()["payload"] == expected_payload
 
     status = client.get("/forms/746/status")
     assert status.status_code == 200
@@ -231,3 +234,57 @@ def test_sync_field_pipedrive(mock_sync_field, client):
     assert data["field_path"] == "cliente.contratante"
     assert data["synced"] is True
     mock_sync_field.assert_called_once_with(746, "cliente.contratante", "Novo Nome")
+
+
+@patch("core.form_readiness_v1.listar_arquivos_deal")
+def test_get_form_attachments(mock_listar, client):
+    from core.form_readiness_v1 import invalidate_deal_attachments_cache
+
+    invalidate_deal_attachments_cache()
+    mock_listar.return_value = [
+        {
+            "id": 1,
+            "file_type": "pdf",
+            "name": "Proposta Comercial - Cliente.pdf",
+            "add_time": "2026-01-01",
+        },
+    ]
+    response = client.get("/forms/746/attachments")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deal_id"] == 746
+    assert data["proposta_comercial_anexada"] is True
+    assert data["contrato"]["source"] == "padrao"
+
+
+def test_readiness_interactive_nao_bate_pipe_sem_cache(client):
+    from core.form_readiness_v1 import invalidate_deal_attachments_cache
+
+    invalidate_deal_attachments_cache()
+    body = {
+        "payload": {"schema_version": "v1", "cliente": {"contratante": "Teste"}},
+        "schema_version": "v1",
+    }
+    with patch("core.form_readiness_v1.listar_arquivos_deal") as mock_listar:
+        response = client.post("/forms/746/readiness", json=body)
+        assert response.status_code == 200
+        mock_listar.assert_not_called()
+
+
+@patch("core.form_readiness_v1.listar_arquivos_deal")
+def test_readiness_reutiliza_cache_anexos(mock_listar, client):
+    from core.form_readiness_v1 import inspect_deal_attachments, invalidate_deal_attachments_cache
+
+    mock_listar.return_value = []
+    invalidate_deal_attachments_cache()
+    inspect_deal_attachments(746)
+    body = {
+        "payload": {"schema_version": "v1", "cliente": {"contratante": "Teste"}},
+        "schema_version": "v1",
+    }
+    first = client.post("/forms/746/readiness", json=body)
+    second = client.post("/forms/746/readiness", json=body)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert mock_listar.call_count == 1
+

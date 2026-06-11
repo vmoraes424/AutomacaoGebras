@@ -76,3 +76,71 @@ def test_apply_hub_instalacoes_codigo_pipe():
     out = apply_hub_instalacoes(payload, [inst], 352)
     assert out["cliente"]["codigo_cliente_instalacao"] == "352/665"
     assert out["hub"]["valor_total"] == "100"
+
+
+def test_normalize_sincroniza_codigo_p1_com_matriz_uc():
+    """P1 legado no Pipe não pode divergir da matriz hub.instalacoes."""
+    payload = {
+        "cliente": {"codigo_cliente_instalacao": "222/451, 1629, 1630"},
+        "hub": {
+            "instalacoes": [
+                _inst(451, "451", {"sole_web": "100"}),
+                _inst(1629, "1629", {"sole_web": "200"}),
+                _inst(1630, "1630", {}),
+            ],
+            "observacoes_detalhes": (
+                "UC = 451 - SOLE WEB = 100,00; UC = 1629 - SOLE WEB = 200,00"
+            ),
+        },
+    }
+    out = normalize_hub_payload(payload)
+    assert out["cliente"]["codigo_cliente_instalacao"] == "222/451,1629"
+    assert out["hub"]["observacoes_detalhes"].count("UC =") == 2
+
+
+def test_normalize_tres_ucs_ativas_mantem_tres_no_p1():
+    payload = {
+        "cliente": {"codigo_cliente_instalacao": "222/451, 1629"},
+        "hub": {
+            "instalacoes": [
+                _inst(451, "451", {"sole_web": "100"}),
+                _inst(1629, "1629", {"sole_web": "200"}),
+                _inst(1630, "1630", {"gestao_acl": "300"}),
+            ],
+        },
+    }
+    out = normalize_hub_payload(payload)
+    assert out["cliente"]["codigo_cliente_instalacao"] == "222/451,1629,1630"
+    assert out["hub"]["observacoes_detalhes"].count("UC =") == 3
+
+
+def test_validate_nao_acusa_mismatch_quando_matriz_sincroniza_p1():
+    from unittest.mock import patch
+
+    from core.form_validation_v1 import validate_form_payload_v1
+
+    payload = {
+        "schema_version": "v1",
+        "cliente": {"codigo_cliente_instalacao": "222/451, 1629, 1630"},
+        "hub": {
+            "instalacoes": [
+                _inst(451, "451", {"sole_web": "100"}),
+                _inst(1629, "1629", {"sole_web": "200"}),
+                _inst(1630, "1630", {}),
+            ],
+        },
+        "anexos": {"proposta_comercial_anexada": True},
+    }
+    patches = (
+        patch("core.form_validation_v1.sincronizar_subcentros_de_pedidos"),
+        patch("core.form_validation_v1.resolver_subcentro", return_value="1"),
+    )
+    for p in patches:
+        p.start()
+    try:
+        errors = validate_form_payload_v1(746, payload)
+    finally:
+        for p in patches:
+            p.stop()
+    assert not any("Observações (Detalhes)" in msg for msg in errors.values())
+    assert "cliente.codigo_cliente_instalacao" not in errors

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { FormPayloadV1 } from "../api/types";
+import type { FormAttachmentsMeta, FormPayloadV1, FormReadiness } from "../api/types";
 import {
   ClienteSection,
   ComercialSection,
@@ -12,18 +12,28 @@ import {
   ValoresDatasSection,
   type PipeFieldSync,
 } from "../components/FormFields";
+import { FormPageAside } from "../components/FormPageAside";
+import { GebrasLoader } from "../components/GebrasLoader";
 import { SyncToastStack, useSyncToasts } from "../components/SyncToast";
 import { isPipeField } from "../constants/pipeFields";
 import { labelForFieldPath } from "../constants/fieldLabels";
 import { mergeFormPayloadV1 } from "../schemas/formV1";
+import { useOwnerName } from "../hooks/useOwnerName";
+import { formatDisplayName } from "../utils/formatDisplayName";
+import {
+  DEAL_LABEL_TEXT,
+  formStatusToOperationalLabel,
+} from "../utils/dealCard";
+import { mergeReadinessWithAttachments } from "../utils/readinessMerge";
 
 export function DealFormPage() {
   const { ownerId, dealId } = useParams<{ ownerId: string; dealId: string }>();
   const location = useLocation();
   const navState = location.state as { ownerName?: string; dealTitle?: string } | null;
-  const ownerName = navState?.ownerName ?? "";
+  const ownerNameFromNav = navState?.ownerName ?? "";
   const dealTitle = navState?.dealTitle ?? "";
   const ownerUserId = Number(ownerId);
+  const ownerName = useOwnerName(ownerUserId, ownerNameFromNav);
   const dealIdNum = Number(dealId);
 
   const [payload, setPayload] = useState<FormPayloadV1>(() => mergeFormPayloadV1(undefined));
@@ -34,6 +44,10 @@ export function DealFormPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [readiness, setReadiness] = useState<FormReadiness | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [attachments, setAttachments] = useState<FormAttachmentsMeta | null>(null);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(true);
   const { toasts, addToast, dismiss } = useSyncToasts();
 
   const readOnly = status === "submitted" || status === "validated" || status === "processing" || status === "processed";
@@ -71,6 +85,26 @@ export function DealFormPage() {
     };
   }, [dealIdNum, ownerUserId]);
 
+  useEffect(() => {
+    if (loading) return;
+    let active = true;
+    setAttachmentsLoading(true);
+    api
+      .getFormAttachments(dealIdNum, { fresh: false })
+      .then((meta) => {
+        if (active) setAttachments(meta);
+      })
+      .catch(() => {
+        if (active) setAttachments(null);
+      })
+      .finally(() => {
+        if (active) setAttachmentsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [dealIdNum, loading]);
+
   const body = () => ({
     payload,
     schema_version: "v1" as const,
@@ -78,6 +112,42 @@ export function DealFormPage() {
     owner_name: ownerName,
     deal_title: dealTitle,
   });
+
+  useEffect(() => {
+    if (loading) return;
+    let active = true;
+    setReadinessLoading(true);
+    const timer = window.setTimeout(() => {
+      api
+        .getFormReadiness(dealIdNum, body())
+        .then((result) => {
+          if (active) setReadiness(result);
+        })
+        .catch(() => {
+          if (active) setReadiness(null);
+        })
+        .finally(() => {
+          if (active) setReadinessLoading(false);
+        });
+    }, 300);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [payload, dealIdNum, ownerUserId, ownerName, dealTitle, loading]);
+
+  const displayReadiness = useMemo(
+    () =>
+      readiness
+        ? mergeReadinessWithAttachments(
+            readiness,
+            attachments,
+            attachmentsLoading,
+            Boolean(payload.anexos?.proposta_comercial_anexada),
+          )
+        : null,
+    [readiness, attachments, attachmentsLoading, payload.anexos?.proposta_comercial_anexada],
+  );
 
   const triggerFieldPulse = useCallback((fieldPath: string) => {
     // flushSync: pinta a animação no mesmo tick após o await (sem esperar frame extra).
@@ -230,44 +300,58 @@ export function DealFormPage() {
   };
 
   if (loading) {
-    return (
-      <div className="layout">
-        <p>Carregando formulário…</p>
-      </div>
-    );
+    return <GebrasLoader variant="form" label="Carregando formulário…" />;
   }
 
+  const statusLabel = status ? formStatusToOperationalLabel(status) : null;
+  const displayTitle = dealTitle ? formatDisplayName(dealTitle) : `Deal #${dealId}`;
+
   return (
-    <div className="layout">
-      <h1>
-        Formulário — deal #{dealId}
-        {dealTitle ? ` (${dealTitle})` : ""}
-      </h1>
-      <p className="muted">
-        <Link to={`/deals/${ownerId}`} state={{ ownerName }}>
+    <div className="layout layout-form">
+      <header className="form-page-header">
+        <Link className="form-back-link" to={`/deals/${ownerId}`} state={{ ownerName }}>
           ← Voltar aos cards
         </Link>
-        {status && <> · Status: <strong>{status}</strong></>}
-        {!readOnly && <> · Campos do Pipe sincronizam ao sair do input</>}
-      </p>
-
-      {message && <div className="alert success">{message}</div>}
-      {error && <div className="alert error">{error}</div>}
-      {validationErrors && Object.keys(validationErrors).length > 0 && (
-        <div className="alert error" role="alert">
-          Corrija os campos:
-          <ul className="validation-list">
-            {Object.entries(validationErrors).map(([k, v]) => (
-              <li key={k}>
-                <strong>{k}</strong>: {v}
-              </li>
-            ))}
-          </ul>
+        <div className="form-page-header-top">
+          <span className="form-deal-id">#{dealId}</span>
+          {statusLabel && (
+            <span className={`badge badge-${statusLabel}`}>{DEAL_LABEL_TEXT[statusLabel]}</span>
+          )}
         </div>
-      )}
-      {readOnly && (
-        <div className="alert info">Este formulário já foi enviado e não pode mais ser editado.</div>
-      )}
+        <h1>{displayTitle}</h1>
+        <p className="form-page-subtitle">Formulário comercial</p>
+        {!readOnly && (
+          <p className="form-sync-hint">Campos do Pipe sincronizam ao sair do input</p>
+        )}
+      </header>
+
+      <FormPageAside
+        ownerName={ownerName}
+        contratante={payload.cliente.contratante}
+        readiness={displayReadiness}
+        readinessLoading={readinessLoading && !readiness}
+        attachmentsLoading={attachmentsLoading}
+      />
+
+      <div className="form-alerts">
+        {message && <div className="alert success">{message}</div>}
+        {error && <div className="alert error">{error}</div>}
+        {validationErrors && Object.keys(validationErrors).length > 0 && (
+          <div className="alert error" role="alert">
+            Corrija os campos:
+            <ul className="validation-list">
+              {Object.entries(validationErrors).map(([k, v]) => (
+                <li key={k}>
+                  <strong>{k}</strong>: {v}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {readOnly && (
+          <div className="alert info">Este formulário já foi enviado e não pode mais ser editado.</div>
+        )}
+      </div>
 
       <ClienteSection {...sectionProps} />
       <ServicosSection {...sectionProps} />
@@ -276,7 +360,7 @@ export function DealFormPage() {
       <SignatariosSection {...sectionProps} />
       <HubSection {...sectionProps} />
 
-      <div className="actions">
+      <div className="form-actions-bar">
         <button type="button" onClick={handleSaveDraft} disabled={saving || readOnly}>
           Salvar rascunho
         </button>

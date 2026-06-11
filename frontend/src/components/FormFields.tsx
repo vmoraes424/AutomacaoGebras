@@ -6,6 +6,7 @@ import { formatMoneyBr, moneyToStorage, parseMoneyBr } from "../utils/money";
 import { HUB_SERVICOS_CATALOGO_FALLBACK } from "../utils/hubCatalog";
 import {
   applyHubInstalacoes,
+  buildObservacoesDetalhesHub,
   catalogoOrdenado,
   codigoClienteOnly,
   getHubInstalacoes,
@@ -17,6 +18,8 @@ import {
   sumColunaServico,
   valorUcInstalacao,
 } from "../utils/ucServicos";
+import { formatDisplayName } from "../utils/formatDisplayName";
+import { joinCidadeEstado, splitCidadeEstado } from "../utils/cidadeEstado";
 import {
   composeFieldClass,
   fieldError,
@@ -183,6 +186,103 @@ function MoneyField({
   );
 }
 
+function MunicipioEstadoFields({
+  value,
+  disabled,
+  fieldErrors,
+  onChange,
+  onFieldBlur,
+  fieldSyncPulse,
+  onFieldPulseEnd,
+}: {
+  value: string;
+  disabled?: boolean;
+  fieldErrors?: Record<string, string>;
+  onChange: (combined: string) => void;
+  onFieldBlur?: (fieldPath: string, value: string) => void;
+  fieldSyncPulse?: Set<string>;
+  onFieldPulseEnd?: (fieldPath: string) => void;
+}) {
+  const fieldKey = "cliente.municipio_estado";
+  const err = fieldError(fieldErrors, fieldKey);
+  const split = splitCidadeEstado(value);
+  const [municipio, setMunicipio] = useState(split.municipio);
+  const [estado, setEstado] = useState(split.estado);
+  const focusRef = useRef({ municipio: split.municipio, estado: split.estado });
+
+  useEffect(() => {
+    const next = splitCidadeEstado(value);
+    setMunicipio(next.municipio);
+    setEstado(next.estado);
+  }, [value]);
+
+  const commitBlur = () => {
+    const combined = joinCidadeEstado(municipio, estado);
+    const prev = joinCidadeEstado(focusRef.current.municipio, focusRef.current.estado);
+    onChange(combined);
+    if (combined !== prev) {
+      onFieldBlur?.(fieldKey, combined);
+    }
+  };
+
+  const inputClass = composeFieldClass(fieldKey, {
+    validationError: Boolean(err),
+    fieldSyncPulse,
+  });
+
+  return (
+    <>
+      <label className={`field-localizacao-estado${err ? " field-has-error" : ""}`}>
+        Estado
+        <input
+          type="text"
+          value={estado}
+          disabled={disabled}
+          maxLength={2}
+          placeholder="UF"
+          aria-invalid={err ? true : undefined}
+          className={inputClass}
+          onFocus={() => {
+            focusRef.current = { municipio, estado };
+          }}
+          onChange={(e) => {
+            const next = e.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
+            setEstado(next);
+            onChange(joinCidadeEstado(municipio, next));
+          }}
+          onBlur={commitBlur}
+          onAnimationEnd={(e) => handleFieldPulseAnimationEnd(e, fieldKey, onFieldPulseEnd)}
+        />
+      </label>
+      <label className={`field-localizacao-municipio${err ? " field-has-error" : ""}`}>
+        Município
+        <input
+          type="text"
+          value={municipio}
+          disabled={disabled}
+          aria-invalid={err ? true : undefined}
+          className={inputClass}
+          onFocus={() => {
+            focusRef.current = { municipio, estado };
+          }}
+          onChange={(e) => {
+            const next = e.target.value;
+            setMunicipio(next);
+            onChange(joinCidadeEstado(next, estado));
+          }}
+          onBlur={commitBlur}
+          onAnimationEnd={(e) => handleFieldPulseAnimationEnd(e, fieldKey, onFieldPulseEnd)}
+        />
+        {err && (
+          <span className="field-error-msg" role="alert">
+            {err}
+          </span>
+        )}
+      </label>
+    </>
+  );
+}
+
 function Field({
   label,
   fieldKey,
@@ -194,6 +294,7 @@ function Field({
   disabled,
   fieldErrors,
   fieldSyncPulse,
+  className,
 }: {
   label: string;
   fieldKey?: string;
@@ -205,6 +306,7 @@ function Field({
   disabled?: boolean;
   fieldErrors?: Record<string, string>;
   fieldSyncPulse?: Set<string>;
+  className?: string;
 }) {
   const err = fieldKey ? fieldError(fieldErrors, fieldKey) : undefined;
   const valueAtFocus = useRef<string>("");
@@ -212,8 +314,10 @@ function Field({
   const normalizeInput = (raw: string) =>
     type === "number" ? (raw === "" ? "0" : String(Number(raw))) : raw;
 
+  const labelClass = [className, err ? "field-has-error" : undefined].filter(Boolean).join(" ") || undefined;
+
   return (
-    <label className={err ? "field-has-error" : undefined}>
+    <label className={labelClass}>
       {label}
       <input
         type={type}
@@ -270,63 +374,92 @@ export function ClienteSection({
   return (
     <section className="form-section" aria-labelledby="sec-cliente">
       <h2 id="sec-cliente">Cliente</h2>
-      <div className="field-grid">
-        <Field fieldKey="cliente.contratante" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Contratante" value={c.contratante} disabled={disabled} onChange={(v) => set("contratante", v)} {...syncProps} />
-        <Field fieldKey="cliente.documento" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="CPF/CNPJ" value={c.documento} disabled={disabled} onChange={(v) => set("documento", v)} {...syncProps} />
-        <Field fieldKey="cliente.cep" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="CEP" value={c.cep} disabled={disabled} onChange={(v) => set("cep", v)} {...syncProps} />
-        <Field fieldKey="cliente.municipio_estado" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Município/Estado" value={c.municipio_estado} disabled={disabled} onChange={(v) => set("municipio_estado", v)} {...syncProps} />
-        <Field fieldKey="cliente.inscricao_estadual" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Inscrição estadual" value={c.inscricao_estadual} disabled={disabled} onChange={(v) => set("inscricao_estadual", v)} {...syncProps} />
-        <Field fieldKey="cliente.inscricao_municipal" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Inscrição municipal" value={c.inscricao_municipal} disabled={disabled} onChange={(v) => set("inscricao_municipal", v)} {...syncProps} />
-        <CodigoClienteField
-          value={c.codigo_cliente_instalacao}
-          disabled={disabled}
-          fieldErrors={fieldErrors}
-          payload={payload}
-          onChange={onChange}
-          onSyncPipeFields={onSyncPipeFields}
-          onPersistDraft={onPersistDraft}
-          fieldSyncPulse={fieldSyncPulse}
-          onFieldPulseEnd={onFieldPulseEnd}
-        />
+      <div className="form-field-group">
+        <h3 className="form-field-group-title">Identificação</h3>
+        <div className="field-grid field-grid-cliente-identificacao">
+          <Field fieldKey="cliente.contratante" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Contratante" value={c.contratante} disabled={disabled} onChange={(v) => set("contratante", v)} {...syncProps} />
+          <Field fieldKey="cliente.documento" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="CPF/CNPJ" value={c.documento} disabled={disabled} onChange={(v) => set("documento", v)} {...syncProps} />
+          <CodigoClienteField
+            value={c.codigo_cliente_instalacao}
+            disabled={disabled}
+            fieldErrors={fieldErrors}
+            payload={payload}
+            onChange={onChange}
+            onSyncPipeFields={onSyncPipeFields}
+            onPersistDraft={onPersistDraft}
+            fieldSyncPulse={fieldSyncPulse}
+            onFieldPulseEnd={onFieldPulseEnd}
+          />
+        </div>
       </div>
-      <div className="field-grid" style={{ marginTop: "0.75rem" }}>
-        <label className={fieldError(fieldErrors, "cliente.endereco") ? "field-has-error" : undefined} style={{ gridColumn: "1 / -1" }}>
-          Endereço
-          <BlurGuardInput
-            fieldPath="cliente.endereco"
-            value={c.endereco}
+      <div className="form-field-group">
+        <h3 className="form-field-group-title">Localização</h3>
+        <div className="field-grid field-grid-cliente-localizacao">
+          <MunicipioEstadoFields
+            value={c.municipio_estado}
             disabled={disabled}
-            ariaInvalid={fieldError(fieldErrors, "cliente.endereco") ? true : undefined}
-            className={composeFieldClass("cliente.endereco", {
-              validationError: Boolean(fieldError(fieldErrors, "cliente.endereco")),
-              fieldSyncPulse,
-            })}
-            onChange={(v) => set("endereco", v)}
+            fieldErrors={fieldErrors}
+            onChange={(v) => set("municipio_estado", v)}
             onFieldBlur={onFieldBlur}
+            fieldSyncPulse={fieldSyncPulse}
             onFieldPulseEnd={onFieldPulseEnd}
           />
-          {fieldError(fieldErrors, "cliente.endereco") && (
-            <span className="field-error-msg" role="alert">{fieldError(fieldErrors, "cliente.endereco")}</span>
-          )}
-        </label>
-        <label className={fieldError(fieldErrors, "cliente.notas") ? "field-has-error" : undefined} style={{ gridColumn: "1 / -1" }}>
-          Notas
-          <BlurGuardTextarea
-            fieldPath="cliente.notas"
-            value={c.notas}
-            disabled={disabled}
-            className={composeFieldClass("cliente.notas", {
-              validationError: Boolean(fieldError(fieldErrors, "cliente.notas")),
-              fieldSyncPulse,
-            })}
-            onChange={(v) => set("notas", v)}
+          <Field
+            fieldKey="cliente.cep"
+            className="field-localizacao-cep"
+            fieldErrors={fieldErrors}
             onFieldBlur={onFieldBlur}
-            onFieldPulseEnd={onFieldPulseEnd}
+            label="CEP"
+            value={c.cep}
+            disabled={disabled}
+            onChange={(v) => set("cep", v)}
+            {...syncProps}
           />
-          {fieldError(fieldErrors, "cliente.notas") && (
-            <span className="field-error-msg" role="alert">{fieldError(fieldErrors, "cliente.notas")}</span>
-          )}
-        </label>
+          <label className={fieldError(fieldErrors, "cliente.endereco") ? "field-has-error field-span-all" : "field-span-all"}>
+            Endereço
+            <BlurGuardInput
+              fieldPath="cliente.endereco"
+              value={c.endereco}
+              disabled={disabled}
+              ariaInvalid={fieldError(fieldErrors, "cliente.endereco") ? true : undefined}
+              className={composeFieldClass("cliente.endereco", {
+                validationError: Boolean(fieldError(fieldErrors, "cliente.endereco")),
+                fieldSyncPulse,
+              })}
+              onChange={(v) => set("endereco", v)}
+              onFieldBlur={onFieldBlur}
+              onFieldPulseEnd={onFieldPulseEnd}
+            />
+            {fieldError(fieldErrors, "cliente.endereco") && (
+              <span className="field-error-msg" role="alert">{fieldError(fieldErrors, "cliente.endereco")}</span>
+            )}
+          </label>
+        </div>
+      </div>
+      <div className="form-field-group">
+        <h3 className="form-field-group-title">Fiscal e observações</h3>
+        <div className="field-grid field-grid-cliente-fiscal">
+          <Field fieldKey="cliente.inscricao_estadual" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Inscrição estadual" value={c.inscricao_estadual} disabled={disabled} onChange={(v) => set("inscricao_estadual", v)} {...syncProps} />
+          <Field fieldKey="cliente.inscricao_municipal" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Inscrição municipal" value={c.inscricao_municipal} disabled={disabled} onChange={(v) => set("inscricao_municipal", v)} {...syncProps} />
+          <label className={fieldError(fieldErrors, "cliente.notas") ? "field-has-error field-span-all" : "field-span-all"}>
+            Notas
+            <BlurGuardTextarea
+              fieldPath="cliente.notas"
+              value={c.notas}
+              disabled={disabled}
+              className={composeFieldClass("cliente.notas", {
+                validationError: Boolean(fieldError(fieldErrors, "cliente.notas")),
+                fieldSyncPulse,
+              })}
+              onChange={(v) => set("notas", v)}
+              onFieldBlur={onFieldBlur}
+              onFieldPulseEnd={onFieldPulseEnd}
+            />
+            {fieldError(fieldErrors, "cliente.notas") && (
+              <span className="field-error-msg" role="alert">{fieldError(fieldErrors, "cliente.notas")}</span>
+            )}
+          </label>
+        </div>
       </div>
     </section>
   );
@@ -382,7 +515,7 @@ function CodigoClienteField({
 
   return (
     <label className={err ? "field-has-error" : undefined}>
-      Código cliente
+      Código cliente HUB
       <input
         type="text"
         inputMode="numeric"
@@ -558,28 +691,37 @@ export function ServicosSection({
             <table className="uc-servicos-table">
               <thead>
                 <tr>
-                  <th scope="col">UC</th>
-                  <th scope="col">Identificação</th>
-                  <th scope="col">Local</th>
+                  <th scope="col" className="uc-sticky uc-sticky-1 uc-col-uc">Cód. instalação</th>
+                  <th scope="col" className="uc-sticky uc-sticky-2 uc-col-id">UC</th>
+                  <th scope="col" className="uc-sticky uc-sticky-3 uc-col-local">Local</th>
                   {colunas.map((col) => (
                     <th key={col.chave} scope="col" className="uc-servicos-th-check">
-                      {col.nome}
-                      <span className="uc-servico-sigla"> ({col.sigla})</span>
+                      <span className="uc-servico-header">
+                        <span className="uc-servico-nome">{col.nome}</span>
+                        <span className="uc-servico-sigla">{col.sigla}</span>
+                      </span>
                     </th>
                   ))}
-                  <th scope="col">Σ UC (extra)</th>
+                  <th scope="col" className="uc-servicos-th-total" title="Soma dos serviços por UC">
+                    Σ UC
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {instalacoes.map((inst, rowIndex) => {
                   const somaUc = valorUcInstalacao(inst);
+                  const identDisplay = inst.identificacao
+                    ? formatDisplayName(inst.identificacao)
+                    : "—";
                   return (
                     <tr key={inst.codigo_instalacao}>
-                      <td>
+                      <td className="uc-sticky uc-sticky-1 uc-col-uc">
                         <strong>{inst.codigo_instalacao}</strong>
                       </td>
-                      <td>{inst.identificacao || "—"}</td>
-                      <td>{[inst.cidade, inst.uf].filter(Boolean).join(" / ") || "—"}</td>
+                      <td className="uc-sticky uc-sticky-2 uc-col-id">{identDisplay}</td>
+                      <td className="uc-sticky uc-sticky-3 uc-col-local">
+                        {[inst.cidade, inst.uf].filter(Boolean).join(" / ") || "—"}
+                      </td>
                       {inst.servicos.map((svc, svcIndex) => (
                         <td key={svc.chave} className="uc-servicos-td-check">
                           <UcServicoCelulaField
@@ -614,35 +756,39 @@ export function ServicosSection({
                 })}
               </tbody>
               <tfoot>
-                <tr>
-                  <th scope="row" colSpan={3}>
-                    Σ por serviço (R$)
+                <tr className="uc-servicos-foot-row">
+                  <th scope="row" colSpan={3} className="uc-sticky uc-sticky-1 uc-foot-label">
+                    Σ por serviço
                   </th>
                   {colunas.map((col) => (
                     <td key={col.chave} className="uc-servicos-total">
                       {formatMoneyBr(sumColunaServico(instalacoes, col.chave)) || "—"}
                     </td>
                   ))}
-                  <td />
+                  <td className="uc-servicos-th-total" />
                 </tr>
-                <tr>
-                  <th scope="row" colSpan={3}>
-                    UCs ativas / valorTotal pedido
+                <tr className="uc-servicos-foot-row uc-servicos-foot-summary">
+                  <th scope="row" colSpan={3} className="uc-sticky uc-sticky-1 uc-foot-label">
+                    Resumo pedido
                   </th>
-                  <td colSpan={colunas.length} className="uc-servicos-total">
-                    {ucsAtivas} UC&apos;s · {formatMoneyBr(totalHub) || "R$ 0,00"}
+                  {colunas.map((col) => (
+                    <td key={col.chave} className="uc-servicos-foot-empty" aria-hidden="true" />
+                  ))}
+                  <td className="uc-servicos-th-total uc-servicos-summary">
+                    <span>{ucsAtivas} UC&apos;s ativas</span>
+                    <span className="uc-summary-sep" aria-hidden="true">·</span>
+                    <span>{formatMoneyBr(totalHub) || "R$ 0,00"}</span>
                   </td>
-                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
-          {payload.hub.observacoes_detalhes && (
+          {(buildObservacoesDetalhesHub(instalacoes) || payload.hub.observacoes_detalhes) && (
             <label className="uc-hub-preview" style={{ marginTop: "0.75rem" }}>
               Observações (Detalhes) — preview HUB
               <textarea
                 readOnly
-                value={payload.hub.observacoes_detalhes}
+                value={buildObservacoesDetalhesHub(instalacoes)}
                 className={composeFieldClass("hub.observacoes_detalhes", { fieldSyncPulse })}
                 rows={3}
               />

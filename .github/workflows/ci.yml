@@ -29,9 +29,8 @@ jobs:
           CLICKSIGN_BASE_URL: https://sandbox.clicksign.com/api/v3
           PLUNE_BASE_URL: https://plune.test.example
           PLUNE_AUTH_TOKEN: pytest-plune-token
-          PULAR_HUB: "false"
           PORTAL_DEAL_FORM_REPOSITORY: memory
-          FORMULARIO_WEB_ENABLED: "true"
+          AUTOMACAO_CONFIG_BACKEND: memory
           PORTAL_API_TOKEN: ""
         run: |
           pytest \
@@ -81,9 +80,8 @@ jobs:
           CLICKSIGN_BASE_URL: https://sandbox.clicksign.com/api/v3
           PLUNE_BASE_URL: https://plune.test.example
           PLUNE_AUTH_TOKEN: pytest-plune-token
-          PULAR_HUB: "false"
           PORTAL_DEAL_FORM_REPOSITORY: memory
-          FORMULARIO_WEB_ENABLED: "true"
+          AUTOMACAO_CONFIG_BACKEND: memory
         run: pytest -m "not integration" -q
 
   frontend:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 
 from core.form_pipe_sync import PipeSyncError
 from portal.composition import PortalContainer
@@ -60,6 +60,25 @@ def get_form_status(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DealNotInContratoStageError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{deal_id}/readiness")
+def get_form_readiness(
+    deal_id: int,
+    body: FormDraftIn,
+    c: PortalContainer = Depends(container),
+) -> dict:
+    return c.get_deal_form_readiness.execute(deal_id, payload=body.payload)
+
+
+@router.get("/{deal_id}/attachments")
+def get_form_attachments(
+    deal_id: int,
+    c: PortalContainer = Depends(container),
+    x_portal_fresh: str | None = Header(default=None, alias="X-Portal-Fresh"),
+) -> dict:
+    fresh = x_portal_fresh == "1"
+    return c.get_deal_form_attachments.execute(deal_id, fresh=fresh)
 
 
 @router.put("/{deal_id}/draft", response_model=FormRecordOut)
