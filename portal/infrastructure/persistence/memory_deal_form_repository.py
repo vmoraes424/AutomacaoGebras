@@ -27,8 +27,9 @@ class MemoryDealFormRepository:
         return deepcopy(form) if form else None
 
     def list_form_status_by_deal_ids(
-        self, deal_ids: list[int], *, schema_version: str = "v1"
+        self, deal_ids: list[int], *, schema_version: str = "v1", fresh: bool = False
     ) -> dict[int, str]:
+        _ = fresh
         wanted = {int(d) for d in deal_ids}
         out: dict[int, str] = {}
         for key, form in self._store.items():

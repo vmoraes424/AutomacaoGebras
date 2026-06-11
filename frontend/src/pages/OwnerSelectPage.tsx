@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { GebrasLoader } from "../components/GebrasLoader";
 import type { CrmUser } from "../api/types";
-import { useCrmSwr } from "../hooks/useCrmSwr";
+import { useCrmQuery } from "../hooks/useCrmQuery";
 import { formatDisplayName } from "../utils/formatDisplayName";
 import { textIncludesFilter } from "../utils/textFilter";
 
@@ -17,8 +17,8 @@ function matchesConsultorFilter(user: CrmUser, filter: string): boolean {
 const USERS_CACHE_KEY = "/pipedrive/users";
 
 export function OwnerSelectPage() {
-  const fetchUsers = useMemo(() => (opts?: { fresh?: boolean }) => api.listUsers(opts), []);
-  const { data: users, loading, error } = useCrmSwr<CrmUser[]>(USERS_CACHE_KEY, fetchUsers, []);
+  const fetchUsers = useMemo(() => () => api.listUsers(), []);
+  const { data: users, loading, error } = useCrmQuery<CrmUser[]>(USERS_CACHE_KEY, fetchUsers, []);
   const [filter, setFilter] = useState("");
 
   const filteredUsers = useMemo(
@@ -82,7 +82,11 @@ export function OwnerSelectPage() {
                   </span>
                 </div>
                 {user.email && <div className="muted consultant-card-email">{user.email}</div>}
-                <Link className="button" to={`/deals/${user.id}`} state={{ ownerName: user.name }}>
+                <Link
+                  className="button"
+                  to={`/deals/${user.id}`}
+                  state={{ ownerName: user.name }}
+                >
                   Ver meus cards
                 </Link>
               </div>

@@ -1,4 +1,4 @@
-"""Cache TTL curto + single-flight — reduz chamadas ao Pipedrive sem esconter dados novos."""
+"""Cache TTL curto + single-flight — uma leitura Pipe por vez, reutilizada no TTL."""
 
 from __future__ import annotations
 
@@ -11,12 +11,12 @@ T = TypeVar("T")
 
 class TtlSingleflightCache(Generic[T]):
     """
-    - Single-flight: requisições paralelas compartilham a mesma chamada em andamento.
-    - TTL: reutiliza resultado recente quando fresh=False.
-    - fresh=True: ignora TTL e busca dados novos (obrigatório ao abrir telas).
+    - fresh=False: devolve valor em cache se ainda dentro do TTL.
+    - fresh=True: ignora cache e busca de novo.
+    - Requisições concorrentes compartilham a mesma chamada em andamento.
     """
 
-    def __init__(self, ttl_seconds: float = 15.0) -> None:
+    def __init__(self, ttl_seconds: float = 30.0) -> None:
         self._ttl = ttl_seconds
         self._lock = threading.Lock()
         self._value: T | None = None
@@ -31,6 +31,9 @@ class TtlSingleflightCache(Generic[T]):
                     return self._value
 
         with self._lock:
+            if not fresh and self._value is not None and time.monotonic() < self._expires_at:
+                return self._value
+
             if self._inflight is not None:
                 waiter = self._inflight
                 is_leader = False

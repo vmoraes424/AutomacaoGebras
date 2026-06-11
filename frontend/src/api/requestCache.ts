@@ -1,20 +1,14 @@
-/** Cache client-side: placeholder instantâneo + revalidação sempre que fresh=true. */
+/** Cache client-side simples: TTL + dedupe de requisições em andamento. */
 
 const PLACEHOLDER_MAX_AGE_MS = 15_000;
 
 type CacheEntry = {
   data: unknown;
   fetchedAt: number;
-  /** Escrita originada de requisição fresh=true (prioridade sobre stale). */
-  fromFresh: boolean;
 };
 
 const store = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<unknown>>();
-
-function inflightKey(key: string, fresh: boolean): string {
-  return `${key}::${fresh ? "fresh" : "stale"}`;
-}
 
 function isEntryValid(entry: CacheEntry | undefined): entry is CacheEntry {
   if (!entry) return false;
@@ -44,47 +38,29 @@ export function invalidateApiCache(prefix?: string) {
   }
 }
 
-function writeCacheEntry(key: string, data: unknown, fresh: boolean) {
-  const existing = store.get(key);
-  if (existing && existing.fromFresh && !fresh) {
-    return;
-  }
-  store.set(key, { data, fetchedAt: Date.now(), fromFresh: fresh });
-}
-
 export async function fetchWithApiCache<T>(
   key: string,
   fetcher: () => Promise<T>,
-  opts?: { fresh?: boolean },
 ): Promise<T> {
-  const fresh = opts?.fresh ?? true;
+  const cached = peekApiCache<T>(key);
+  if (cached !== null) return cached;
 
-  if (!fresh) {
-    const cached = peekApiCache<T>(key);
-    if (cached !== null) {
-      return cached;
-    }
-  }
-
-  const pendingKey = inflightKey(key, fresh);
-  const pending = inflight.get(pendingKey);
-  if (pending) {
-    return pending as Promise<T>;
-  }
+  const pending = inflight.get(key);
+  if (pending) return pending as Promise<T>;
 
   const promise = fetcher()
     .then((data) => {
-      writeCacheEntry(key, data, fresh);
-      inflight.delete(pendingKey);
+      store.set(key, { data, fetchedAt: Date.now() });
+      inflight.delete(key);
       return data;
     })
     .catch((err) => {
-      inflight.delete(pendingKey);
+      inflight.delete(key);
       throw err;
     });
 
-  inflight.set(pendingKey, promise);
-  return promise as Promise<T>;
+  inflight.set(key, promise);
+  return promise;
 }
 
 export function resetApiClientCachesForTests() {

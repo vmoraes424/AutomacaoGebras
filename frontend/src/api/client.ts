@@ -76,28 +76,19 @@ function cacheKey(path: string) {
 }
 
 export const api = {
-  listUsers: (opts?: { fresh?: boolean }) =>
-    fetchWithApiCache(
-      cacheKey("/pipedrive/users"),
-      () => request<CrmUser[]>("/pipedrive/users", { fresh: opts?.fresh ?? true }),
-      opts,
+  listUsers: () =>
+    fetchWithApiCache(cacheKey("/pipedrive/users"), () =>
+      request<CrmUser[]>("/pipedrive/users"),
     ),
 
-  listDeals: (ownerUserId: number, opts?: { fresh?: boolean }) =>
-    fetchWithApiCache(
-      cacheKey(`/pipedrive/deals?owner_user_id=${ownerUserId}`),
-      () =>
-        request<CrmDeal[]>(`/pipedrive/deals?owner_user_id=${ownerUserId}`, {
-          fresh: opts?.fresh ?? true,
-        }),
-      opts,
+  listDeals: (ownerUserId: number) =>
+    fetchWithApiCache(cacheKey(`/pipedrive/deals?owner_user_id=${ownerUserId}`), () =>
+      request<CrmDeal[]>(`/pipedrive/deals?owner_user_id=${ownerUserId}`),
     ),
 
-  getHubServicos: (opts?: { fresh?: boolean }) =>
-    fetchWithApiCache(
-      cacheKey("/hub/servicos"),
-      () => request<HubServicosResponse>("/hub/servicos", { fresh: opts?.fresh ?? false }),
-      opts,
+  getHubServicos: () =>
+    fetchWithApiCache(cacheKey("/hub/servicos"), () =>
+      request<HubServicosResponse>("/hub/servicos"),
     ),
 
   getHubInstalacoes: (codigoClienteInstalacao: string) =>
@@ -140,14 +131,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  getFormAttachments: (dealId: number, opts?: { fresh?: boolean }) =>
-    fetchWithApiCache(
-      cacheKey(`/forms/${dealId}/attachments`),
-      () =>
-        request<FormAttachmentsMeta>(`/forms/${dealId}/attachments`, {
-          fresh: opts?.fresh ?? false,
-        }),
-      opts,
+  getFormAttachments: (dealId: number) =>
+    fetchWithApiCache(cacheKey(`/forms/${dealId}/attachments`), () =>
+      request<FormAttachmentsMeta>(`/forms/${dealId}/attachments`),
     ),
 
   submitForm: (dealId: number, body: FormDraftBody) => {

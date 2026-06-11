@@ -14,6 +14,9 @@ from core.gebras_defaults import (
 )
 
 _stages_por_pipeline: dict[str, dict[str, int]] = {}
+_contrato_stage_ids_cache: list[int] | None = None
+
+PIPEDRIVE_V2_BASE = "https://api.pipedrive.com/api/v2"
 
 
 def _normalizar_nome_etapa(nome: str) -> str:
@@ -23,12 +26,49 @@ def _normalizar_nome_etapa(nome: str) -> str:
 
 
 def _headers() -> dict[str, str]:
-    return {"x-api-token": PIPEDRIVE_API_TOKEN}
+    from core import config
+
+    return {"x-api-token": config.PIPEDRIVE_API_TOKEN}
 
 
 def limpar_cache_stages() -> None:
     """Limpa cache de etapas (útil em testes)."""
+    global _contrato_stage_ids_cache
     _stages_por_pipeline.clear()
+    _contrato_stage_ids_cache = None
+
+
+def list_stage_ids_etapa_contrato() -> list[int]:
+    """
+    stage_id da etapa Contrato em cada pipeline do Pipedrive.
+    Uma única chamada GET /stages (evita N+1 por pipeline).
+    """
+    global _contrato_stage_ids_cache
+    if _contrato_stage_ids_cache is not None:
+        return list(_contrato_stage_ids_cache)
+
+    chave = _normalizar_nome_etapa(PIPEDRIVE_STAGE_CONTRATO_NOME)
+    response = requests.get(
+        f"{PIPEDRIVE_V2_BASE}/stages",
+        headers=_headers(),
+        params={"limit": 500},
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Pipedrive stages -> {response.status_code}: {response.text[:500]}"
+        )
+
+    stage_ids: list[int] = []
+    for stage in response.json().get("data") or []:
+        sid = stage.get("id")
+        if sid is None:
+            continue
+        if _normalizar_nome_etapa(stage.get("name") or "") == chave:
+            stage_ids.append(int(sid))
+
+    _contrato_stage_ids_cache = stage_ids
+    return list(stage_ids)
 
 
 def _carregar_stages_pipeline(pipeline_id: str) -> None:

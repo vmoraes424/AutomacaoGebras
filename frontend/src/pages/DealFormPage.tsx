@@ -90,7 +90,7 @@ export function DealFormPage() {
     let active = true;
     setAttachmentsLoading(true);
     api
-      .getFormAttachments(dealIdNum, { fresh: false })
+      .getFormAttachments(dealIdNum)
       .then((meta) => {
         if (active) setAttachments(meta);
       })

@@ -84,3 +84,4 @@ def test_invalidate_forca_nova_leitura():
     cache.invalidate()
     assert cache.get_or_fetch(fresh=False, fetcher=fetcher) == 2
     assert calls["n"] == 2
+

@@ -23,6 +23,7 @@ from portal.domain.formulario.value_objects import FormStatus
 from portal.infrastructure.persistence.memory_deal_form_repository import (
     MemoryDealFormRepository,
 )
+from portal.infrastructure.pipedrive.pipedrive_crm_reader import PipedriveCrmReader
 from portal.main import create_app
 
 
@@ -74,39 +75,47 @@ def client():
     reset_container()
 
 
-@patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.deal_esta_em_etapa_contrato")
 @patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.requests.get")
+@patch(
+    "portal.infrastructure.pipedrive.pipedrive_crm_reader.list_stage_ids_etapa_contrato",
+    return_value=[7],
+)
 def test_list_deals_enriched_com_status_form(
-    mock_get, mock_em_contrato, client, eligible_pipe_deal
+    mock_stages, mock_get, client, eligible_pipe_deal
 ):
-    mock_em_contrato.side_effect = lambda d: d.get("id") in (746, 999)
-
     page = MagicMock()
     page.ok = True
     page.status_code = 200
-    page.json.return_value = {
-        "data": [
-            {
-                "id": 746,
-                "title": "Biview",
-                "owner_id": 1,
-                "stage_id": 7,
-                "status": "open",
-                "pipeline_id": 1,
-            },
-            {
-                "id": 999,
-                "title": "Outro",
-                "owner_id": 1,
-                "stage_id": 7,
-                "status": "open",
-                "pipeline_id": 1,
-            },
-        ],
-        "additional_data": {},
-    }
+    page.text = ""
+    page.json.side_effect = [
+        {
+            "data": [
+                {
+                    "id": 746,
+                    "title": "Biview",
+                    "owner_id": 1,
+                    "stage_id": 7,
+                    "status": "open",
+                    "pipeline_id": 1,
+                    "org_id": 670,
+                },
+                {
+                    "id": 999,
+                    "title": "Outro",
+                    "owner_id": 1,
+                    "stage_id": 7,
+                    "status": "open",
+                    "pipeline_id": 1,
+                    "org_id": 671,
+                },
+            ],
+            "additional_data": {},
+        },
+        {"data": [{"id": 670, "name": "A"}, {"id": 671, "name": "B"}]},
+    ]
     mock_get.return_value = page
 
+    PipedriveCrmReader.invalidate_crm_cache()
     fixture = (
         Path(__file__).resolve().parent
         / "fixtures"

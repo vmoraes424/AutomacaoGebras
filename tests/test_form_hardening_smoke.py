@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from portal.composition import reset_container
 from portal.domain.crm.entities import CrmDeal, CrmUser
+from portal.infrastructure.pipedrive.pipedrive_crm_reader import PipedriveCrmReader
 from portal.main import create_app
 
 
@@ -46,27 +47,35 @@ def test_smoke_list_users(client):
     assert response.json()[0]["name"] == "Alice"
 
 
-@patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.deal_esta_em_etapa_contrato")
 @patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.requests.get")
-def test_smoke_list_deals(mock_get, mock_em_contrato, client):
-    mock_em_contrato.return_value = True
+@patch(
+    "portal.infrastructure.pipedrive.pipedrive_crm_reader.list_stage_ids_etapa_contrato",
+    return_value=[7],
+)
+def test_smoke_list_deals(mock_stages, mock_get, client):
     page = MagicMock()
     page.ok = True
-    page.json.return_value = {
-        "data": [
-            {
-                "id": 746,
-                "title": "Smoke deal",
-                "owner_id": 1,
-                "stage_id": 7,
-                "status": "open",
-                "pipeline_id": 1,
-            }
-        ],
-        "additional_data": {},
-    }
+    page.text = ""
+    page.json.side_effect = [
+        {
+            "data": [
+                {
+                    "id": 746,
+                    "title": "Smoke deal",
+                    "owner_id": 1,
+                    "stage_id": 7,
+                    "status": "open",
+                    "pipeline_id": 1,
+                    "org_id": 670,
+                }
+            ],
+            "additional_data": {},
+        },
+        {"data": [{"id": 670, "name": "Org"}]},
+    ]
     mock_get.return_value = page
 
+    PipedriveCrmReader.invalidate_crm_cache()
     response = client.get("/pipedrive/deals", params={"owner_user_id": 1})
     assert response.status_code == 200
     deals = response.json()

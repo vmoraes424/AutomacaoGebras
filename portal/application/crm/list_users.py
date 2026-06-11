@@ -13,13 +13,12 @@ class ListCrmUsers:
         self._crm_reader = crm_reader
 
     def execute(self, *, fresh: bool = False) -> list[CrmUser]:
-        deals = self._crm_reader.list_open_deals_in_contrato_stage(fresh=fresh)
-        counts = Counter(d.owner_id for d in deals if d.owner_id is not None)
+        snapshot = self._crm_reader.get_contrato_snapshot(fresh=fresh)
+        counts = Counter(d.owner_id for d in snapshot.deals if d.owner_id is not None)
         if not counts:
             return []
 
-        users = self._crm_reader.list_users(fresh=fresh)
-        filtered = [u for u in users if u.id in counts]
+        filtered = [u for u in snapshot.users if u.id in counts]
         filtered.sort(key=lambda u: (u.name or "").casefold())
         return [
             CrmUser(

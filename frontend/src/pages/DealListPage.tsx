@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { DealCard } from "../components/DealCard";
 import { GebrasLoader } from "../components/GebrasLoader";
 import type { CrmDeal } from "../api/types";
 import { api } from "../api/client";
-import { useCrmSwr } from "../hooks/useCrmSwr";
+import { useCrmQuery } from "../hooks/useCrmQuery";
 import { useOwnerName } from "../hooks/useOwnerName";
 import { matchesDealFilter } from "../utils/dealFilter";
 import { formatDisplayName } from "../utils/formatDisplayName";
@@ -17,11 +17,8 @@ export function DealListPage() {
   const ownerName = useOwnerName(ownerUserId, ownerNameFromNav);
 
   const dealsCacheKey = ownerUserId ? `/pipedrive/deals?owner_user_id=${ownerUserId}` : "";
-  const fetchDeals = useMemo(
-    () => (opts?: { fresh?: boolean }) => api.listDeals(ownerUserId, opts),
-    [ownerUserId],
-  );
-  const { data: deals, loading, error } = useCrmSwr<CrmDeal[]>(
+  const fetchDeals = useMemo(() => () => api.listDeals(ownerUserId), [ownerUserId]);
+  const { data: deals, loading, error } = useCrmQuery<CrmDeal[]>(
     dealsCacheKey,
     fetchDeals,
     [],

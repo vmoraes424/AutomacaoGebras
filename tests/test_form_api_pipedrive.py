@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from portal.domain.crm.entities import CrmDeal, CrmUser
+from portal.domain.crm.entities import ContratoSnapshot, CrmDeal, CrmUser
 from portal.domain.crm.exceptions import CrmReadError
 from portal.infrastructure.pipedrive.pipedrive_crm_reader import PipedriveCrmReader
 from portal.main import create_app
@@ -18,21 +18,20 @@ def client():
     return TestClient(create_app())
 
 
+def _snapshot(users: list[CrmUser], deals: list[CrmDeal]) -> ContratoSnapshot:
+    return ContratoSnapshot(deals=tuple(deals), users=tuple(users))
+
+
 def test_list_users(client):
     mock_users = [
         CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),
         CrmUser(id=2, name="Bob", email="bob@gebras.com.br"),
     ]
-    mock_deals = [
-        CrmDeal(id=746, title="Biview", owner_id=1),
-    ]
-    with (
-        patch.object(PipedriveCrmReader, "list_users", return_value=mock_users),
-        patch.object(
-            PipedriveCrmReader,
-            "list_open_deals_in_contrato_stage",
-            return_value=mock_deals,
-        ),
+    mock_deals = [CrmDeal(id=746, title="Biview", owner_id=1)]
+    with patch.object(
+        PipedriveCrmReader,
+        "get_contrato_snapshot",
+        return_value=_snapshot(mock_users, mock_deals),
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 200
@@ -56,13 +55,10 @@ def test_list_users_conta_deals_por_consultor(client):
         CrmDeal(id=747, title="Outro", owner_id=1),
         CrmDeal(id=800, title="Bob deal", owner_id=2),
     ]
-    with (
-        patch.object(PipedriveCrmReader, "list_users", return_value=mock_users),
-        patch.object(
-            PipedriveCrmReader,
-            "list_open_deals_in_contrato_stage",
-            return_value=mock_deals,
-        ),
+    with patch.object(
+        PipedriveCrmReader,
+        "get_contrato_snapshot",
+        return_value=_snapshot(mock_users, mock_deals),
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 200
@@ -73,13 +69,10 @@ def test_list_users_conta_deals_por_consultor(client):
 
 def test_list_users_sem_deals_contrato_retorna_vazio(client):
     mock_users = [CrmUser(id=1, name="Alice", email="alice@gebras.com.br")]
-    with (
-        patch.object(PipedriveCrmReader, "list_users", return_value=mock_users),
-        patch.object(
-            PipedriveCrmReader,
-            "list_open_deals_in_contrato_stage",
-            return_value=[],
-        ),
+    with patch.object(
+        PipedriveCrmReader,
+        "get_contrato_snapshot",
+        return_value=_snapshot(mock_users, []),
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 200
@@ -87,18 +80,10 @@ def test_list_users_sem_deals_contrato_retorna_vazio(client):
 
 
 def test_list_users_pipedrive_error(client):
-    mock_deals = [CrmDeal(id=746, title="Biview", owner_id=1)]
-    with (
-        patch.object(
-            PipedriveCrmReader,
-            "list_users",
-            side_effect=CrmReadError("falha pipe"),
-        ),
-        patch.object(
-            PipedriveCrmReader,
-            "list_open_deals_in_contrato_stage",
-            return_value=mock_deals,
-        ),
+    with patch.object(
+        PipedriveCrmReader,
+        "get_contrato_snapshot",
+        side_effect=CrmReadError("falha pipe"),
     ):
         response = client.get("/pipedrive/users")
     assert response.status_code == 502
@@ -108,36 +93,25 @@ def test_x_portal_fresh_header_bypasses_backend_cache(client):
     """Sem header reutiliza TTL; X-Portal-Fresh: 1 força nova leitura do Pipe."""
     PipedriveCrmReader.invalidate_crm_cache()
 
-    mock_users = [
-        CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),
-    ]
-    mock_deals = [
-        CrmDeal(id=746, title="Biview", owner_id=1),
-    ]
-    fetch_count = {"users": 0, "deals": 0}
+    mock_users = [CrmUser(id=1, name="Alice", email="alice@gebras.com.br")]
+    mock_deals = [CrmDeal(id=746, title="Biview", owner_id=1)]
+    fetch_count = {"n": 0}
 
-    def fetch_users(_self):
-        fetch_count["users"] += 1
-        return mock_users
+    def fetch_snapshot(_self):
+        fetch_count["n"] += 1
+        return _snapshot(mock_users, mock_deals)
 
-    def fetch_deals(_self):
-        fetch_count["deals"] += 1
-        return mock_deals
-
-    with (
-        patch.object(PipedriveCrmReader, "_fetch_users", fetch_users),
-        patch.object(PipedriveCrmReader, "_fetch_all_contrato_deals", fetch_deals),
-    ):
+    with patch.object(PipedriveCrmReader, "_fetch_contrato_snapshot", fetch_snapshot):
         assert client.get("/pipedrive/users").status_code == 200
-        assert fetch_count == {"users": 1, "deals": 1}
+        assert fetch_count["n"] == 1
 
         assert client.get("/pipedrive/users").status_code == 200
-        assert fetch_count == {"users": 1, "deals": 1}
+        assert fetch_count["n"] == 1
 
         assert (
             client.get("/pipedrive/users", headers={"X-Portal-Fresh": "1"}).status_code == 200
         )
-        assert fetch_count == {"users": 2, "deals": 2}
+        assert fetch_count["n"] == 2
 
     PipedriveCrmReader.invalidate_crm_cache()
 
@@ -145,19 +119,20 @@ def test_x_portal_fresh_header_bypasses_backend_cache(client):
 def test_list_deals_sem_fresh_header_usa_cache(client):
     PipedriveCrmReader.invalidate_crm_cache()
 
+    mock_users = [CrmUser(id=1, name="Alice", email="alice@gebras.com.br")]
     mock_deals = [CrmDeal(id=746, title="Biview", owner_id=1)]
-    fetch_count = {"deals": 0}
+    fetch_count = {"n": 0}
 
-    def fetch_deals(_self):
-        fetch_count["deals"] += 1
-        return mock_deals
+    def fetch_snapshot(_self):
+        fetch_count["n"] += 1
+        return _snapshot(mock_users, mock_deals)
 
-    with patch.object(PipedriveCrmReader, "_fetch_all_contrato_deals", fetch_deals):
+    with patch.object(PipedriveCrmReader, "_fetch_contrato_snapshot", fetch_snapshot):
         assert client.get("/pipedrive/deals", params={"owner_user_id": 1}).status_code == 200
-        assert fetch_count["deals"] == 1
+        assert fetch_count["n"] == 1
 
         assert client.get("/pipedrive/deals", params={"owner_user_id": 1}).status_code == 200
-        assert fetch_count["deals"] == 1
+        assert fetch_count["n"] == 1
 
         assert (
             client.get(
@@ -167,42 +142,43 @@ def test_list_deals_sem_fresh_header_usa_cache(client):
             ).status_code
             == 200
         )
-        assert fetch_count["deals"] == 2
+        assert fetch_count["n"] == 2
 
     PipedriveCrmReader.invalidate_crm_cache()
 
 
-@patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.deal_esta_em_etapa_contrato")
 @patch("portal.infrastructure.pipedrive.pipedrive_crm_reader.requests.get")
-def test_list_deals_filtra_etapa_contrato_e_owner(mock_get, mock_em_contrato, client):
-    mock_em_contrato.side_effect = lambda d: d.get("id") in (746, 999)
-
+@patch(
+    "portal.infrastructure.pipedrive.pipedrive_crm_reader.list_stage_ids_etapa_contrato",
+    return_value=[7],
+)
+def test_list_deals_filtra_etapa_contrato_e_owner(mock_stages, mock_get, client):
     page = MagicMock()
     page.ok = True
     page.status_code = 200
-    page.json.return_value = {
-        "data": [
-            {
-                "id": 746,
-                "title": "Biview",
-                "owner_id": 24587114,
-                "stage_id": 7,
-                "status": "open",
-                "pipeline_id": 1,
-            },
-            {
-                "id": 100,
-                "title": "Outro",
-                "owner_id": 24587114,
-                "stage_id": 5,
-                "status": "open",
-                "pipeline_id": 1,
-            },
-        ],
-        "additional_data": {},
-    }
+    page.text = ""
+    page.json.side_effect = [
+        {"data": []},
+        {
+            "data": [
+                {
+                    "id": 746,
+                    "title": "Biview",
+                    "owner_id": 24587114,
+                    "stage_id": 7,
+                    "status": "open",
+                    "pipeline_id": 1,
+                    "org_id": 670,
+                },
+            ],
+            "additional_data": {},
+        },
+        {"data": [{"id": 670, "name": "Biview Org"}]},
+        {"data": []},
+    ]
     mock_get.return_value = page
 
+    PipedriveCrmReader.invalidate_crm_cache()
     response = client.get("/pipedrive/deals", params={"owner_user_id": 24587114})
 
     assert response.status_code == 200
@@ -214,8 +190,10 @@ def test_list_deals_filtra_etapa_contrato_e_owner(mock_get, mock_em_contrato, cl
     assert data[0]["operational_label"] == "pendente"
     assert data[0]["ready_for_form"] is True
     assert data[0]["ready_for_automation"] is False
-    assert mock_get.call_args.kwargs["params"]["status"] == "open"
-    assert "owner_id" not in mock_get.call_args.kwargs["params"]
+    deals_call = mock_get.call_args_list[1]
+    assert deals_call.kwargs["params"]["status"] == "open"
+    assert deals_call.kwargs["params"]["stage_id"] == 7
+    assert "owner_id" not in deals_call.kwargs["params"]
 
 
 def test_portal_package_has_no_forbidden_imports():

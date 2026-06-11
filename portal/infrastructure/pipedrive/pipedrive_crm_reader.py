@@ -1,4 +1,4 @@
-"""ACL: API Pipedrive → entidades do contexto CRM."""
+"""ACL: API Pipedrive → snapshot Contrato (deals + users), cacheado no portal."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ from typing import Any
 import requests
 
 from core.config import PIPEDRIVE_API_TOKEN
-from core.pipedrive_stages import deal_esta_em_etapa_contrato
-from portal.domain.crm.entities import CrmDeal, CrmUser
+from core.pipedrive_stages import list_stage_ids_etapa_contrato
+from portal.domain.crm.entities import ContratoSnapshot, CrmDeal, CrmUser
 from portal.domain.crm.exceptions import CrmReadError
 from portal.infrastructure.cache.ttl_singleflight import TtlSingleflightCache
 
 PIPEDRIVE_V2_BASE = "https://api.pipedrive.com/api/v2"
-PIPEDRIVE_V1_BASE = "https://api.pipedrive.com/v1"
+PIPEDRIVE_V1_BASE = "https://api.pipedrive.com/api/v1"
 
-# Snapshot compartilhado: consultores + cards por dono na mesma leitura do Pipe.
-_CONTRATO_DEALS_CACHE: TtlSingleflightCache[list[CrmDeal]] = TtlSingleflightCache(ttl_seconds=15.0)
-_USERS_CACHE: TtlSingleflightCache[list[CrmUser]] = TtlSingleflightCache(ttl_seconds=15.0)
+# Uma leitura Pipe serve /pipedrive/users e /pipedrive/deals.
+_SNAPSHOT_CACHE: TtlSingleflightCache[ContratoSnapshot] = TtlSingleflightCache(ttl_seconds=30.0)
+_ORG_IDS_CHUNK = 100
 
 
 class PipedriveCrmReader:
@@ -31,14 +31,16 @@ class PipedriveCrmReader:
 
     @staticmethod
     def invalidate_crm_cache() -> None:
-        _CONTRATO_DEALS_CACHE.invalidate()
-        _USERS_CACHE.invalidate()
+        _SNAPSHOT_CACHE.invalidate()
+
+    def get_contrato_snapshot(self, *, fresh: bool = False) -> ContratoSnapshot:
+        return _SNAPSHOT_CACHE.get_or_fetch(
+            fresh=fresh,
+            fetcher=self._fetch_contrato_snapshot,
+        )
 
     def list_users(self, *, fresh: bool = False) -> list[CrmUser]:
-        return _USERS_CACHE.get_or_fetch(
-            fresh=fresh,
-            fetcher=self._fetch_users,
-        )
+        return list(self.get_contrato_snapshot(fresh=fresh).users)
 
     def list_open_deals_in_contrato_stage(
         self,
@@ -46,13 +48,15 @@ class PipedriveCrmReader:
         owner_user_id: int | None = None,
         fresh: bool = False,
     ) -> list[CrmDeal]:
-        all_deals = _CONTRATO_DEALS_CACHE.get_or_fetch(
-            fresh=fresh,
-            fetcher=self._fetch_all_contrato_deals,
-        )
+        deals = list(self.get_contrato_snapshot(fresh=fresh).deals)
         if owner_user_id is None:
-            return all_deals
-        return [d for d in all_deals if d.owner_id == owner_user_id]
+            return deals
+        return [d for d in deals if d.owner_id == owner_user_id]
+
+    def _fetch_contrato_snapshot(self) -> ContratoSnapshot:
+        users = self._fetch_users()
+        deals = self._fetch_contrato_deals()
+        return ContratoSnapshot(deals=tuple(deals), users=tuple(users))
 
     def _fetch_users(self) -> list[CrmUser]:
         response = requests.get(
@@ -76,12 +80,16 @@ class PipedriveCrmReader:
             if u.get("id") is not None and u.get("active_flag") is not False
         ]
 
-    def _fetch_all_contrato_deals(self) -> list[CrmDeal]:
+    def _fetch_deals_open_in_stage(self, stage_id: int) -> list[dict[str, Any]]:
         raw_deals: list[dict[str, Any]] = []
         cursor: str | None = None
 
         while True:
-            params: dict[str, Any] = {"status": "open", "limit": 500}
+            params: dict[str, Any] = {
+                "status": "open",
+                "stage_id": stage_id,
+                "limit": 500,
+            }
             if cursor:
                 params["cursor"] = cursor
 
@@ -93,21 +101,40 @@ class PipedriveCrmReader:
             )
             if not response.ok:
                 raise CrmReadError(
-                    f"Pipedrive deals -> {response.status_code}: {response.text[:500]}"
+                    f"Pipedrive deals stage={stage_id} -> "
+                    f"{response.status_code}: {response.text[:500]}"
                 )
 
             body = response.json()
             page = body.get("data") or []
             if isinstance(page, dict):
                 page = [page]
-
-            for deal in page:
-                if deal_esta_em_etapa_contrato(deal):
-                    raw_deals.append(deal)
+            raw_deals.extend(page)
 
             cursor = (body.get("additional_data") or {}).get("next_cursor")
             if not cursor:
                 break
+
+        return raw_deals
+
+    def _fetch_contrato_deals(self) -> list[CrmDeal]:
+        stage_ids = list_stage_ids_etapa_contrato()
+        if not stage_ids:
+            return []
+
+        raw_deals: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+
+        for stage_id in stage_ids:
+            for deal in self._fetch_deals_open_in_stage(stage_id):
+                deal_id = deal.get("id")
+                if deal_id is None:
+                    continue
+                deal_id_int = int(deal_id)
+                if deal_id_int in seen_ids:
+                    continue
+                seen_ids.add(deal_id_int)
+                raw_deals.append(deal)
 
         org_ids = {
             int(d["org_id"])
@@ -118,17 +145,30 @@ class PipedriveCrmReader:
         return [self._to_crm_deal(deal, org_names) for deal in raw_deals]
 
     def _fetch_org_names(self, org_ids: set[int]) -> dict[int, str]:
+        if not org_ids:
+            return {}
+
         names: dict[int, str] = {}
-        for org_id in sorted(org_ids):
+        sorted_ids = sorted(org_ids)
+
+        for offset in range(0, len(sorted_ids), _ORG_IDS_CHUNK):
+            chunk = sorted_ids[offset : offset + _ORG_IDS_CHUNK]
             response = requests.get(
-                f"{PIPEDRIVE_V2_BASE}/organizations/{org_id}",
+                f"{PIPEDRIVE_V2_BASE}/organizations",
                 headers=self._headers(),
+                params={"ids": ",".join(str(i) for i in chunk), "limit": 500},
                 timeout=30,
             )
             if not response.ok:
                 continue
-            data = response.json().get("data") or {}
-            names[org_id] = str(data.get("name") or "").strip()
+            for org in response.json().get("data") or []:
+                org_id = org.get("id")
+                if org_id is None:
+                    continue
+                name = str(org.get("name") or "").strip()
+                if name:
+                    names[int(org_id)] = name
+
         return names
 
     @staticmethod

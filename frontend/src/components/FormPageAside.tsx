@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import type { FormReadiness, FormReadinessItem } from "../api/types";
+import type { FormReadiness, FormReadinessItem, FormReadinessSection } from "../api/types";
 import { formatDisplayName } from "../utils/formatDisplayName";
 import { GebrasLoader } from "./GebrasLoader";
 
@@ -13,9 +13,16 @@ type FormPageAsideProps = {
 
 type PendingItem = FormReadinessItem & { sectionLabel: string };
 
-function collectPendingItems(readiness: FormReadiness): PendingItem[] {
+function countSectionPending(section: FormReadinessSection): number {
+  return section.items.filter((item) => item.status === "pending" || item.status === "error").length;
+}
+
+function collectPendingItems(readiness: FormReadiness, sectionId?: string): PendingItem[] {
   const out: PendingItem[] = [];
-  for (const section of readiness.sections) {
+  const sections = sectionId
+    ? readiness.sections.filter((section) => section.id === sectionId)
+    : readiness.sections;
+  for (const section of sections) {
     for (const item of section.items) {
       if (item.status === "pending" || item.status === "error") {
         out.push({ ...item, sectionLabel: section.label });
@@ -25,13 +32,19 @@ function collectPendingItems(readiness: FormReadiness): PendingItem[] {
   return out;
 }
 
+type PendingModalFilter =
+  | { mode: "all" }
+  | { mode: "section"; sectionId: string; sectionLabel: string };
+
 function PendingItemsModal({
   items,
   percent,
+  sectionLabel,
   onClose,
 }: {
   items: PendingItem[];
   percent: number;
+  sectionLabel?: string;
   onClose: () => void;
 }) {
   const titleId = useId();
@@ -67,7 +80,7 @@ function PendingItemsModal({
         <header className="readiness-modal-header">
           <div>
             <h3 id={titleId} className="readiness-modal-title">
-              O que falta preencher
+              {sectionLabel ? `O que falta em ${sectionLabel}` : "O que falta preencher"}
             </h3>
             <p className="readiness-modal-sub">
               {items.length} {items.length === 1 ? "campo pendente" : "campos pendentes"} · {percent}%
@@ -115,11 +128,15 @@ export function FormPageAside({
   readinessLoading,
   attachmentsLoading = false,
 }: FormPageAsideProps) {
-  const [pendingOpen, setPendingOpen] = useState(false);
+  const [pendingModal, setPendingModal] = useState<PendingModalFilter | null>(null);
   const displayOwner = ownerName ? formatDisplayName(ownerName) : "—";
   const displayCliente = contratante ? formatDisplayName(contratante) : "—";
   const percent = readiness?.summary.percent ?? 0;
   const pendingItems = readiness ? collectPendingItems(readiness) : [];
+  const modalItems =
+    readiness && pendingModal?.mode === "section"
+      ? collectPendingItems(readiness, pendingModal.sectionId)
+      : pendingItems;
   const hasPending = pendingItems.length > 0;
   const readyClass =
     readiness?.ready_to_submit
@@ -129,7 +146,7 @@ export function FormPageAside({
         : "";
 
   useEffect(() => {
-    if (!hasPending) setPendingOpen(false);
+    if (!hasPending) setPendingModal(null);
   }, [hasPending]);
 
   const ringLabel = hasPending
@@ -160,9 +177,7 @@ export function FormPageAside({
                     : undefined
                 }
               >
-                {readiness.contrato.source === "custom"
-                  ? "Contrato customizado"
-                  : "Modelo padrão Gebras"}
+                {readiness.contrato.source === "custom" ? "Customizado" : "Padrão Gebras"}
               </span>
             </div>
           )}
@@ -189,7 +204,7 @@ export function FormPageAside({
               <button
                 type="button"
                 className="form-meta-readiness-ring form-meta-readiness-ring-btn"
-                onClick={() => setPendingOpen(true)}
+                onClick={() => setPendingModal({ mode: "all" })}
                 aria-label={ringLabel}
                 title="Ver o que falta preencher"
               >
@@ -226,32 +241,64 @@ export function FormPageAside({
               <button
                 type="button"
                 className="form-meta-readiness-link"
-                onClick={() => setPendingOpen(true)}
+                onClick={() => setPendingModal({ mode: "all" })}
               >
                 Ver o que falta preencher ({pendingItems.length})
               </button>
             )}
 
             <ul className="form-meta-section-chips">
-              {readiness.sections.map((section) => (
-                <li
-                  key={section.id}
-                  className={
-                    section.loading
-                      ? "form-meta-chip form-meta-chip--loading"
-                      : section.ready
-                        ? "form-meta-chip form-meta-chip--ok"
-                        : section.completed > 0
-                          ? "form-meta-chip form-meta-chip--partial"
-                          : "form-meta-chip"
-                  }
-                >
-                  <span className="form-meta-chip-label">{section.label}</span>
-                  <span className="form-meta-chip-count">
-                    {section.loading ? "…" : `${section.completed}/${section.total}`}
-                  </span>
-                </li>
-              ))}
+              {readiness.sections.map((section) => {
+                const sectionPending = countSectionPending(section);
+                const chipClass = [
+                  "form-meta-chip",
+                  section.loading
+                    ? "form-meta-chip--loading"
+                    : section.ready
+                      ? "form-meta-chip--ok"
+                      : section.completed > 0
+                        ? "form-meta-chip--partial"
+                        : "",
+                  sectionPending > 0 && !section.loading ? "form-meta-chip--clickable" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+
+                const chipContent = (
+                  <>
+                    <span className="form-meta-chip-label">{section.label}</span>
+                    <span className="form-meta-chip-count">
+                      {section.loading ? "…" : `${section.completed}/${section.total}`}
+                    </span>
+                  </>
+                );
+
+                return (
+                  <li key={section.id}>
+                    {sectionPending > 0 && !section.loading ? (
+                      <button
+                        type="button"
+                        className={chipClass}
+                        onClick={() =>
+                          setPendingModal({
+                            mode: "section",
+                            sectionId: section.id,
+                            sectionLabel: section.label,
+                          })
+                        }
+                        title={`Ver ${sectionPending} ${sectionPending === 1 ? "campo pendente" : "campos pendentes"} em ${section.label}`}
+                        aria-label={`${section.label}: ${section.completed} de ${section.total} preenchidos. ${sectionPending} pendentes. Clique para ver.`}
+                      >
+                        {chipContent}
+                      </button>
+                    ) : (
+                      <span className={chipClass} aria-label={`${section.label}: ${section.completed} de ${section.total}`}>
+                        {chipContent}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
             {attachmentsLoading && (
               <p className="form-meta-attachments-hint muted" aria-live="polite">
@@ -262,11 +309,12 @@ export function FormPageAside({
         )}
       </section>
 
-      {pendingOpen && hasPending && (
+      {pendingModal && modalItems.length > 0 && (
         <PendingItemsModal
-          items={pendingItems}
+          items={modalItems}
           percent={percent}
-          onClose={() => setPendingOpen(false)}
+          sectionLabel={pendingModal.mode === "section" ? pendingModal.sectionLabel : undefined}
+          onClose={() => setPendingModal(null)}
         />
       )}
     </div>

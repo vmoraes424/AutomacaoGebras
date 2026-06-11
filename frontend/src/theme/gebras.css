@@ -30,6 +30,8 @@
   --gebras-shadow-idle: 0 4px 14px rgba(0, 0, 0, 0.06);
   --gebras-shadow-hover: 0 5px 18px rgba(231, 76, 60, 0.12);
 
-  --app-gutter: clamp(1rem, 2.5vw, 2.5rem);
+  --app-gutter: clamp(0.75rem, 2.5vw, 2.5rem);
   --app-content-max: none;
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-top: env(safe-area-inset-top, 0px);
 }

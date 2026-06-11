@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import threading
 from typing import Any, Iterator
 
 import pymysql
@@ -55,6 +56,27 @@ _SEED_DEFAULT_BRANCH_ID = "751"
 
 _SCHEMA_VERSION = 11
 _initialized = False
+_thread_local = threading.local()
+
+
+def _connection_alive(raw: pymysql.connections.Connection) -> bool:
+    try:
+        raw.ping(reconnect=False)
+        return True
+    except pymysql.err.Error:
+        return False
+
+
+def _open_raw_connection() -> pymysql.connections.Connection:
+    return pymysql.connect(**mysql_connect_kwargs(database=MYSQL_DATABASE))
+
+
+def _get_thread_raw_connection() -> pymysql.connections.Connection:
+    raw = getattr(_thread_local, "raw", None)
+    if raw is None or not _connection_alive(raw):
+        raw = _open_raw_connection()
+        _thread_local.raw = raw
+    return raw
 
 
 class _ExecuteResult:
@@ -119,7 +141,7 @@ def db_conn() -> Iterator[DbConnection]:
         raise RuntimeError(
             "MySQL não configurado: defina MYSQL_HOST, MYSQL_USER e MYSQL_PASSWORD no .env"
         )
-    raw = pymysql.connect(**mysql_connect_kwargs(database=MYSQL_DATABASE))
+    raw = _get_thread_raw_connection()
     conn = DbConnection(raw)
     try:
         if not _initialized:
@@ -131,8 +153,6 @@ def db_conn() -> Iterator[DbConnection]:
     except Exception:
         conn.rollback()
         raise
-    finally:
-        conn.close()
 
 
 def _init_schema(conn: DbConnection) -> None:

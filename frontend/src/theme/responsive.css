@@ -1,0 +1,384 @@
+/* Responsividade global — importado por último em main.tsx (cascade) */
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  width: 100%;
+  max-width: 100%;
+}
+
+body {
+  overflow-x: clip;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+#root,
+.app-shell,
+.app-header,
+.app-main,
+.app-footer {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.app-shell {
+  overflow-x: clip;
+}
+
+.layout,
+.layout-form,
+.card,
+.config-page,
+.form-meta-card {
+  min-width: 0;
+}
+
+code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.page-breadcrumb {
+  margin: 0 0 0.85rem;
+}
+
+.page-header h1,
+.form-page-header h1,
+.config-page-title,
+.deal-card-title {
+  overflow-wrap: anywhere;
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ——— Desktop amplo (≥1025px) ——— */
+@media (min-width: 1025px) {
+  .form-page-meta {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+}
+
+/* ——— Tablet / desktop estreito (≤1024px) ——— */
+@media (max-width: 1024px) {
+  .field-grid-cliente-identificacao {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .field-grid-cliente-identificacao .field-span-all,
+  .field-grid-cliente-identificacao label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .field-grid-cliente-localizacao {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .field-localizacao-estado {
+    grid-column: 1;
+  }
+
+  .field-localizacao-municipio {
+    grid-column: 2;
+  }
+
+  .field-localizacao-cep {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ——— Tablet portrait (≤768px) ——— */
+@media (max-width: 768px) {
+  .app-header-inner {
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding-top: calc(0.85rem + var(--app-safe-top));
+  }
+
+  .app-brand {
+    flex: 1 1 12rem;
+    min-width: 0;
+  }
+
+  .app-header-nav {
+    flex: 1 1 auto;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+  }
+
+  .app-main {
+    padding-top: 0.85rem;
+    padding-bottom: calc(var(--app-gutter) + var(--app-safe-bottom));
+  }
+
+  .page-header h1,
+  .form-page-header h1 {
+    font-size: clamp(1.2rem, 5vw, 1.55rem);
+  }
+
+  .filter-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+    padding: 0.85rem 1rem;
+  }
+
+  .filter-field {
+    flex: 1 1 auto;
+    max-width: none;
+    width: 100%;
+  }
+
+  .filter-meta {
+    white-space: normal;
+    text-align: left;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-section,
+  .form-page-header,
+  .form-meta-card,
+  .filter-toolbar {
+    padding: 0.9rem 1rem;
+  }
+
+  .field-grid,
+  .field-grid-cliente-identificacao,
+  .field-grid-cliente-localizacao,
+  .field-grid-cliente-fiscal {
+    grid-template-columns: 1fr;
+  }
+
+  .field-localizacao-estado,
+  .field-localizacao-municipio,
+  .field-localizacao-cep {
+    grid-column: auto;
+  }
+
+  .form-page-meta {
+    gap: 0.75rem;
+  }
+
+  .form-meta-readiness-top {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  .form-meta-context-grid {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .form-actions-bar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 1rem;
+    padding-bottom: calc(0.85rem + var(--app-safe-bottom));
+    margin-left: calc(-1 * var(--app-gutter));
+    margin-right: calc(-1 * var(--app-gutter));
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .form-actions-bar button,
+  .form-actions-bar a.button {
+    width: 100%;
+    min-height: 2.75rem;
+  }
+
+  .layout-form {
+    padding-bottom: calc(5.5rem + var(--app-safe-bottom));
+  }
+
+  .config-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .config-actions button {
+    width: 100%;
+    min-height: 2.75rem;
+  }
+
+  .config-page {
+    padding: 0.5rem 0 2rem;
+  }
+
+  .config-page-title {
+    font-size: clamp(1.15rem, 5vw, 1.5rem);
+  }
+
+  .config-card {
+    padding: 0.9rem 1rem;
+  }
+
+  .config-gate {
+    max-width: none;
+  }
+
+  .readiness-modal-header,
+  .readiness-modal-body {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .page-header .muted {
+    line-height: 1.45;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 0.95rem);
+  }
+
+  button,
+  a.button {
+    min-height: 2.65rem;
+  }
+
+  .readiness-modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .readiness-modal {
+    width: 100%;
+    max-height: min(92vh, 100dvh);
+    border-radius: var(--gebras-radius-lg) var(--gebras-radius-lg) 0 0;
+    margin-top: auto;
+  }
+
+  .toast-stack {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.75rem + var(--app-safe-bottom));
+    max-width: none;
+  }
+
+  .uc-servicos-wrap {
+    -webkit-overflow-scrolling: touch;
+    border-radius: var(--gebras-radius-sm);
+    max-width: 100%;
+  }
+
+  .form-section,
+  .form-page-header,
+  .form-page-meta,
+  .form-meta-card,
+  .form-alerts,
+  .layout,
+  .layout-form {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+
+/* ——— Mobile (≤480px) ——— */
+@media (max-width: 480px) {
+  .app-brand-subtitle {
+    display: none;
+  }
+
+  .app-brand-title {
+    font-size: 1.05rem;
+  }
+
+  .app-header-link {
+    font-size: 0.72rem;
+    padding: 0.4rem 0.55rem;
+    text-align: center;
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  .app-footer {
+    font-size: 0.68rem;
+    padding-bottom: calc(0.55rem + var(--app-safe-bottom));
+  }
+
+  .form-page-header-top {
+    gap: 0.35rem 0.5rem;
+  }
+
+  .badge {
+    font-size: 0.65rem;
+    padding: 0.2rem 0.45rem;
+  }
+
+  .deal-card-top {
+    flex-wrap: wrap;
+  }
+
+  .consultant-card-head {
+    flex-wrap: wrap;
+  }
+
+  .form-meta-section-chips {
+    gap: 0.3rem;
+  }
+
+  .form-meta-chip {
+    font-size: 0.68rem;
+    padding: 0.22rem 0.45rem;
+  }
+
+  .form-meta-readiness-ring {
+    width: 2.85rem;
+    height: 2.85rem;
+  }
+
+  .form-meta-readiness-percent {
+    font-size: 0.78rem;
+  }
+
+  .form-sync-hint {
+    display: block;
+    width: 100%;
+  }
+
+  .page-breadcrumb {
+    font-size: 0.85rem;
+  }
+
+  .gebras-loader-screen {
+    min-height: calc(100dvh - 10rem);
+  }
+}
+
+/* ——— Telas muito estreitas (≤360px) ——— */
+@media (max-width: 360px) {
+  :root {
+    --app-gutter: 0.65rem;
+  }
+
+  .form-section h2 {
+    font-size: 0.95rem;
+  }
+}
+
+/* ——— Landscape mobile ——— */
+@media (max-height: 500px) and (orientation: landscape) {
+  .gebras-loader-screen {
+    min-height: auto;
+    padding: 1rem;
+  }
+
+  .readiness-modal {
+    max-height: 95dvh;
+  }
+}

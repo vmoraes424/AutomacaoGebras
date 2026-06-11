@@ -4,6 +4,14 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class ContratoSnapshot:
+    """Leitura única do Pipedrive: deals na etapa Contrato + usuários ativos."""
+
+    deals: tuple[CrmDeal, ...]
+    users: tuple[CrmUser, ...]
+
+
+@dataclass(frozen=True)
 class CrmUser:
     id: int
     name: str

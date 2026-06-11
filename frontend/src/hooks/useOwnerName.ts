@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, peekApiCache } from "../api/client";
 
-/** Resposta < 4s indica hit no cache backend; miss no Pipedrive leva ~15s+. */
-const BACKEND_CACHE_HIT_MS = 4000;
-
-/** Resolve nome do consultor — usa state da rota ou busca em /pipedrive/users. */
+/** Resolve nome do consultor — usa state da rota ou cache de /pipedrive/users. */
 export function useOwnerName(ownerUserId: number | undefined, ownerNameFromNav: string): string {
   const [resolved, setResolved] = useState(ownerNameFromNav);
 
@@ -27,28 +24,16 @@ export function useOwnerName(ownerUserId: number | undefined, ownerNameFromNav: 
 
     let cancelled = false;
 
-    async function resolveName() {
-      try {
-        const t0 = performance.now();
-        const users = await api.listUsers({ fresh: false });
-        const elapsed = performance.now() - t0;
+    api
+      .listUsers()
+      .then((users) => {
         if (cancelled) return;
-
         const match = users.find((u) => u.id === ownerUserId);
         setResolved(match?.name ?? "");
-
-        if (elapsed < BACKEND_CACHE_HIT_MS) {
-          const freshUsers = await api.listUsers({ fresh: true });
-          if (cancelled) return;
-          const freshMatch = freshUsers.find((u) => u.id === ownerUserId);
-          setResolved(freshMatch?.name ?? "");
-        }
-      } catch {
+      })
+      .catch(() => {
         if (!cancelled) setResolved("");
-      }
-    }
-
-    void resolveName();
+      });
 
     return () => {
       cancelled = true;

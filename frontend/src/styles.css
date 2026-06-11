@@ -557,12 +557,13 @@ button:disabled {
   line-height: 1.2;
 }
 
-/* Meta — contexto + prontidão (abaixo do título, full width) */
+/* Meta — contexto + prontidão (mobile-first: 1 coluna) */
 .form-page-meta {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 1rem;
   margin-bottom: 1.35rem;
+  width: 100%;
 }
 
 .form-meta-card {
@@ -626,13 +627,15 @@ button:disabled {
 
 .form-meta-contrato-badge {
   display: inline-flex;
-  align-items: center;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.68rem;
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  line-height: 1.25;
-  border-radius: 999px;
+  line-height: 1.2;
+  border-radius: 4px;
   border: 1px solid var(--gebras-border-soft);
   background: var(--gebras-surface-muted);
   color: var(--gebras-text-secondary);
@@ -925,6 +928,10 @@ button:disabled {
   gap: 0.4rem;
 }
 
+.form-meta-section-chips > li {
+  display: contents;
+}
+
 .form-meta-chip {
   display: inline-flex;
   align-items: center;
@@ -955,6 +962,48 @@ button:disabled {
   border-color: var(--gebras-border-soft);
   background: var(--gebras-surface-muted);
   animation: form-meta-chip-pulse 1.2s ease-in-out infinite;
+}
+
+.form-meta-chip--clickable {
+  cursor: pointer;
+  appearance: none;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--gebras-border-soft);
+  background: var(--gebras-surface-muted);
+  color: var(--gebras-text-secondary);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.form-meta-chip--clickable.form-meta-chip--partial {
+  color: var(--gebras-dark-blue);
+  border-color: rgba(52, 73, 94, 0.2);
+  background: rgba(52, 73, 94, 0.06);
+}
+
+button.form-meta-chip--clickable:hover {
+  border-color: var(--gebras-dark-blue);
+  background: rgba(52, 73, 94, 0.12);
+  color: var(--gebras-dark-blue);
+}
+
+button.form-meta-chip--clickable:focus-visible {
+  outline: 2px solid var(--gebras-dark-blue);
+  outline-offset: 2px;
+}
+
+button.form-meta-chip--clickable:active {
+  transform: scale(0.98);
+  background: rgba(52, 73, 94, 0.18);
+  color: var(--gebras-dark-blue);
 }
 
 @keyframes form-meta-chip-pulse {
@@ -1543,59 +1592,7 @@ textarea.field-sync-pulse {
   background: transparent !important;
 }
 
-@media (max-width: 640px) {
-  .app-brand-subtitle {
-    display: none;
-  }
-
-  .field-grid-cliente-identificacao,
-  .field-grid-cliente-localizacao,
-  .field-grid-cliente-fiscal {
-    grid-template-columns: 1fr;
-  }
-
-  .field-localizacao-estado,
-  .field-localizacao-municipio,
-  .field-localizacao-cep {
-    grid-column: auto;
-  }
-
-  .card-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .form-actions-bar {
-    flex-direction: column;
-  }
-
-  .form-page-header-grid,
-  .form-page-meta {
-    grid-template-columns: 1fr;
-  }
-
-  .form-page-aside {
-    border-left: none;
-    border-top: none;
-    padding-left: 0;
-    padding-top: 0;
-  }
-
-  .form-actions-bar button,
-  .form-actions-bar a.button {
-    width: 100%;
-  }
-
-  .actions {
-    flex-direction: column;
-  }
-
-  .actions button,
-  .actions a.button {
-    width: 100%;
-  }
-}
-
-/* Loader Gebras — spinner + skeletons */
+/* Responsividade: importado por último em main.tsx */
 @keyframes gebras-spin {
   to {
     transform: rotate(360deg);

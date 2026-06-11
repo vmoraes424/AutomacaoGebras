@@ -137,9 +137,12 @@ describe("DealFormPage", () => {
     const user = userEvent.setup();
     renderForm();
     expect(await screen.findByDisplayValue("Salvo")).toBeInTheDocument();
-    const openBtn = await screen.findByRole("button", { name: /pendente[s]?.*Clique para ver/i });
+    const openBtn = await screen.findByRole("button", {
+      name: /Cliente:.*pendentes.*Clique para ver/i,
+    });
     await user.click(openBtn);
     const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("O que falta em Cliente")).toBeInTheDocument();
     expect(within(dialog).getByText("Notas")).toBeInTheDocument();
   });
 

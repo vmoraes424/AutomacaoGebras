@@ -11,7 +11,7 @@ class DealFormRepository(Protocol):
     ) -> DealForm | None: ...
 
     def list_form_status_by_deal_ids(
-        self, deal_ids: list[int], *, schema_version: str = "v1"
+        self, deal_ids: list[int], *, schema_version: str = "v1", fresh: bool = False
     ) -> dict[int, str]: ...
 
     def save_draft(

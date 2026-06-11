@@ -22,19 +22,19 @@ class MysqlDealFormRepository:
         self._conn_factory = conn_factory or db_conn
 
     def list_form_status_by_deal_ids(
-        self, deal_ids: list[int], *, schema_version: str = "v1"
+        self, deal_ids: list[int], *, schema_version: str = "v1", fresh: bool = False
     ) -> dict[int, str]:
+        _ = fresh
         if not deal_ids:
             return {}
-        placeholders = ", ".join(["%s"] * len(deal_ids))
-        params: list = [*deal_ids, schema_version]
+        placeholders = ",".join(["%s"] * len(deal_ids))
         with self._conn_factory() as conn:
             rows = conn.execute(
                 f"""
                 SELECT deal_id, status FROM deal_forms
-                WHERE deal_id IN ({placeholders}) AND schema_version = %s
+                WHERE schema_version = %s AND deal_id IN ({placeholders})
                 """,
-                tuple(params),
+                (schema_version, *deal_ids),
             ).fetchall()
         return {int(row["deal_id"]): str(row["status"]) for row in rows}
 
