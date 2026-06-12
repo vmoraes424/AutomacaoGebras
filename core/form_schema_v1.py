@@ -153,6 +153,7 @@ class HubInstalacaoPedidoV1(_FormSection):
     razao_social: str = ""
     cidade: str = ""
     uf: str = ""
+    ativo: bool = True
     valor_uc: str = ""
     servicos: list[HubServicoItemV1] = Field(default_factory=list)
 

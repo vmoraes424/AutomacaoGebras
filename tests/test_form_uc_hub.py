@@ -9,6 +9,7 @@ from core.form_uc_hub import (
     build_observacoes_detalhes_hub,
     format_valor_br_hub,
     normalize_hub_payload,
+    servico_item_ativo,
     soma_valores_hub,
 )
 from core.hub_catalogo import servicos_template_hub
@@ -27,6 +28,12 @@ def _inst(codigo: int, ident: str, ativos: dict[str, str]) -> dict:
         "identificacao": ident,
         "servicos": servicos,
     }
+
+
+def test_servico_item_ativo_somente_por_valor():
+    tmpl = servicos_template_hub()[0]
+    assert servico_item_ativo({**tmpl, "ativo": True, "valor": ""}) is False
+    assert servico_item_ativo({**tmpl, "ativo": False, "valor": "800"}) is True
 
 
 def test_build_observacoes_soma_valores_por_uc():

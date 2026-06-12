@@ -14,6 +14,7 @@ import {
   parseCodigoClienteInstalacao,
   countUcsAtivas,
   pipeFieldsFromUcMatrix,
+  servicoPatchFromValor,
   somaValoresHub,
   sumColunaServico,
   valorUcInstalacao,
@@ -564,13 +565,11 @@ function UcServicoCelulaField({
   celula,
   label,
   disabled,
-  onToggle,
   onValorCommit,
 }: {
   celula: HubServicoItem;
   label: string;
   disabled?: boolean;
-  onToggle: () => void;
   onValorCommit: (valor: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -581,16 +580,12 @@ function UcServicoCelulaField({
 
   return (
     <div className="uc-servico-celula">
-      <label className="uc-servico-check">
-        <input type="checkbox" checked={celula.ativo} disabled={disabled} onChange={onToggle} />
-        <span className="sr-only">{label}</span>
-      </label>
       <input
         type="text"
         inputMode="decimal"
         className="uc-servico-valor"
         value={shown}
-        disabled={disabled || !celula.ativo}
+        disabled={disabled}
         aria-label={`Valor ${label}`}
         onFocus={() => {
           valueAtFocus.current = moneyToStorage(celula.valor);
@@ -601,7 +596,12 @@ function UcServicoCelulaField({
         onBlur={() => {
           setEditing(false);
           const parsed = parseMoneyBr(draft);
-          const stored = parsed !== null ? moneyToStorage(parsed) : moneyToStorage(celula.valor);
+          const stored =
+            parsed !== null
+              ? moneyToStorage(parsed)
+              : draft.trim() === ""
+                ? ""
+                : moneyToStorage(celula.valor);
           if (stored !== valueAtFocus.current) onValorCommit(stored);
         }}
       />
@@ -624,7 +624,7 @@ export function ServicosSection({
   const { codigoCliente } = parseCodigoClienteInstalacao(payload.cliente.codigo_cliente_instalacao);
   const [loading, setLoading] = useState(false);
   const [hubError, setHubError] = useState("");
-  const bootstrapped = useRef(false);
+  const hubSyncedFor = useRef<number | null>(null);
   const totalHub = somaValoresHub(instalacoes);
   const ucsAtivas = countUcsAtivas(instalacoes);
 
@@ -633,8 +633,12 @@ export function ServicosSection({
   }, []);
 
   useEffect(() => {
-    if (bootstrapped.current || !codigoCliente || instalacoes.length > 0) return;
-    bootstrapped.current = true;
+    if (!codigoCliente) {
+      hubSyncedFor.current = null;
+      return;
+    }
+    if (hubSyncedFor.current === codigoCliente) return;
+    hubSyncedFor.current = codigoCliente;
     setLoading(true);
     api
       .getHubInstalacoes(String(codigoCliente))
@@ -642,10 +646,11 @@ export function ServicosSection({
         onChange(mergeHubInstalacoes(payload, hub.instalacoes, codigoCliente, colunas));
       })
       .catch((e: unknown) => {
+        hubSyncedFor.current = null;
         setHubError(e instanceof Error ? e.message : "Erro ao carregar instalações");
       })
       .finally(() => setLoading(false));
-  }, [codigoCliente, colunas, instalacoes.length, onChange, payload]);
+  }, [codigoCliente, colunas, onChange, payload]);
 
   const commitMatrix = async (nextInstalacoes: HubInstalacaoPedido[]) => {
     if (!codigoCliente) return;
@@ -675,8 +680,8 @@ export function ServicosSection({
     <section className="form-section" aria-labelledby="sec-servicos">
       <h2 id="sec-servicos">UC × serviço × valor</h2>
       <p className="field-hint">
-        Marque o serviço e informe o valor (R$) por UC. No HUB, o valor por UC é a soma dos
-        serviços (pedido_instalacao_extra); os códigos de serviço vão em
+        Informe o valor (R$) por UC. Serviço entra no pedido quando o valor for maior que zero.
+        No HUB, o valor por UC é a soma dos serviços (pedido_instalacao_extra); os códigos de serviço vão em
         pedido_instalacao_servico. Só o código cliente/instalação sincroniza no Pipedrive em tempo
         real.
       </p>
@@ -716,7 +721,28 @@ export function ServicosSection({
                   return (
                     <tr key={inst.codigo_instalacao}>
                       <td className="uc-sticky uc-sticky-1 uc-col-uc">
-                        <strong>{inst.codigo_instalacao}</strong>
+                        <div
+                          className={`uc-instalacao-cell${inst.ativo === false ? " uc-instalacao-cell--inativa" : ""}`}
+                        >
+                          <strong className="uc-instalacao-cod">{inst.codigo_instalacao}</strong>
+                          <span
+                            className={
+                              inst.ativo === false
+                                ? "uc-instalacao-status uc-instalacao-status--inativa"
+                                : "uc-instalacao-status uc-instalacao-status--ativa"
+                            }
+                            title={
+                              inst.ativo === false
+                                ? "Instalação inativa no HUB (ATIVO = N)"
+                                : "Instalação ativa no HUB (ATIVO = S)"
+                            }
+                          >
+                            <span className="uc-instalacao-status-dot" aria-hidden />
+                            <span className="uc-instalacao-status-label">
+                              {inst.ativo === false ? "Inativa" : "Ativa"}
+                            </span>
+                          </span>
+                        </div>
                       </td>
                       <td className="uc-sticky uc-sticky-2 uc-col-id">{identDisplay}</td>
                       <td className="uc-sticky uc-sticky-3 uc-col-local">
@@ -728,21 +754,9 @@ export function ServicosSection({
                             celula={svc}
                             label={`${svc.nome} — UC ${inst.codigo_instalacao}`}
                             disabled={disabled}
-                            onToggle={() => {
-                              const ativo = !svc.ativo;
-                              void commitMatrix(
-                                updateCelula(rowIndex, svcIndex, {
-                                  ativo,
-                                  valor: ativo ? svc.valor : "",
-                                }),
-                              );
-                            }}
                             onValorCommit={(valor) => {
                               void commitMatrix(
-                                updateCelula(rowIndex, svcIndex, {
-                                  ativo: true,
-                                  valor,
-                                }),
+                                updateCelula(rowIndex, svcIndex, servicoPatchFromValor(valor)),
                               );
                             }}
                           />

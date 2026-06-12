@@ -7,8 +7,12 @@ import {
   emptyUcServicosMatriz,
   formatCodigoClienteInstalacao,
   parseCodigoClienteInstalacao,
+  mergeHubInstalacoes,
   pipeFieldsFromUcMatrix,
   servicosTemplateHub,
+  servicoAtivoPorValor,
+  servicoItemAtivo,
+  servicoPatchFromValor,
   somaValoresHub,
 } from "../utils/ucServicos";
 import { HUB_SERVICOS_CATALOGO_FALLBACK } from "../utils/hubCatalog";
@@ -52,10 +56,23 @@ describe("ucServicos", () => {
     );
   });
 
+  it("servico ativo depende só do valor > 0", () => {
+    expect(servicoAtivoPorValor("45")).toBe(true);
+    expect(servicoAtivoPorValor("0")).toBe(false);
+    expect(servicoAtivoPorValor("")).toBe(false);
+    const patch = servicoPatchFromValor("1000");
+    expect(patch).toEqual({ valor: "1000", ativo: true });
+    expect(servicoPatchFromValor("")).toEqual({ valor: "", ativo: false });
+
+    const servicos = servicosTemplateHub(HUB_SERVICOS_CATALOGO_FALLBACK);
+    const sw = servicos.find((s) => s.chave === "sole_web")!;
+    expect(servicoItemAtivo({ ...sw, ativo: false, valor: "1000" })).toBe(true);
+    expect(servicoItemAtivo({ ...sw, ativo: true, valor: "" })).toBe(false);
+  });
+
   it("applyHubInstalacoes estrutura pedido_instalacao_extra", () => {
     const servicos = servicosTemplateHub(HUB_SERVICOS_CATALOGO_FALLBACK);
     const sw = servicos.find((s) => s.chave === "sole_web")!;
-    sw.ativo = true;
     sw.valor = "1950";
     const next = applyHubInstalacoes(emptyFormPayloadV1(), [
       {
@@ -71,6 +88,42 @@ describe("ucServicos", () => {
     ], 352);
     expect(next.hub.instalacoes[0].servicos.find((s) => s.chave === "sole_web")?.codigo_servico).toBe(2);
     expect(next.hub.valor_total).toBe("1950");
+  });
+
+  it("mergeHubInstalacoes atualiza ativo do HUB sem perder serviços salvos", () => {
+    const servicos = servicosTemplateHub(HUB_SERVICOS_CATALOGO_FALLBACK);
+    const base = applyHubInstalacoes(emptyFormPayloadV1(), [
+      {
+        codigo_instalacao: 2652,
+        codigo_cliente: 352,
+        identificacao: "",
+        razao_social: "",
+        cidade: "Pelotas",
+        uf: "RS",
+        ativo: true,
+        valor_uc: "",
+        servicos,
+      },
+    ], 352);
+
+    const next = mergeHubInstalacoes(
+      base,
+      [
+        {
+          codigo: 2652,
+          identificacao: "",
+          razao_social: "",
+          cidade: "Pelotas",
+          uf: "RS",
+          ativo: false,
+        },
+      ],
+      352,
+      HUB_SERVICOS_CATALOGO_FALLBACK,
+    );
+
+    expect(next.hub.instalacoes[0].ativo).toBe(false);
+    expect(next.hub.instalacoes[0].servicos.length).toBe(servicos.length);
   });
 
   it("pipeFieldsFromUcMatrix so envia codigo cliente/instalacao", () => {

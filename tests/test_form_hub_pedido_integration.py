@@ -178,12 +178,16 @@ def deal_merged_do_form(form: dict | None = None, deal_id: int = 888001) -> dict
 class RecordingCursor:
     """Captura SQL executado (mock hub_conn)."""
 
-    def __init__(self, *, lastrowid: int = 9001) -> None:
+    def __init__(self, *, lastrowid: int = 9001, fetchall_rows: list[tuple] | None = None) -> None:
         self.executions: list[tuple[str, tuple]] = []
         self.lastrowid = lastrowid
+        self.fetchall_rows = list(fetchall_rows or [])
 
     def execute(self, sql: str, params=None) -> None:
         self.executions.append((sql.strip(), params or ()))
+
+    def fetchall(self) -> list[tuple]:
+        return list(self.fetchall_rows)
 
     def __enter__(self):
         return self
@@ -314,9 +318,11 @@ class TestCriarPedidoHubComDealDoForm:
         assert out["codigos_instalacao"] == [12108]
         assert set(out["instalacoes_obs"][0]["servicos"]) == {1, 2, 3}
         assert out["instalacoes_obs"][0]["valor"] == "1950.00"
+        assert out["instalacoes_ativadas"] == []
 
         sqls = _sqls(cursor)
         assert any("INSERT INTO pedido" in s for s in sqls)
+        assert any("SELECT CODIGO" in s and "instalacao" in s for s in sqls)
         assert any("INSERT INTO pedido_instalacao_extra" in s for s in sqls)
         assert any("INSERT INTO pedido_instalacao_servico" in s for s in sqls)
         assert any("INSERT INTO pedido_plune" in s for s in sqls)

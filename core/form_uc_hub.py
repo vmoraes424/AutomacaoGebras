@@ -49,9 +49,12 @@ def identificacao_uc_hub(identificacao: str, codigo_instalacao: int) -> str:
 
 
 def servico_item_ativo(item: dict[str, Any]) -> bool:
-    if not item.get("ativo"):
-        return False
     return _parse_valor_storage(item.get("valor")) > 0
+
+
+def _normalize_servico_item(item: dict[str, Any]) -> dict[str, Any]:
+    valor = str(item.get("valor") or "")
+    return {**item, "valor": valor, "ativo": servico_item_ativo({"valor": valor})}
 
 
 def valor_uc_instalacao(instalacao: dict[str, Any]) -> Decimal:
@@ -117,13 +120,7 @@ def _merge_servicos_instalacao(
     for tmpl in servicos_template_hub():
         chave = tmpl["chave"]
         prev = por_chave.get(chave) or {}
-        merged.append(
-            {
-                **tmpl,
-                "ativo": bool(prev.get("ativo")),
-                "valor": str(prev.get("valor") or ""),
-            }
-        )
+        merged.append(_normalize_servico_item({**tmpl, **prev}))
     return merged
 
 
@@ -142,15 +139,16 @@ def _legacy_uc_linha_para_instalacao(
         else:
             celula = {}
         servicos.append(
-            {
-                "codigo_servico": cat.codigo_servico,
-                "chave": chave,
-                "nome": cat.nome,
-                "sigla": cat.sigla,
-                "nome_pipe": cat.nome_pipe,
-                "ativo": bool(celula.get("ativo")),
-                "valor": str(celula.get("valor") or ""),
-            }
+            _normalize_servico_item(
+                {
+                    "codigo_servico": cat.codigo_servico,
+                    "chave": chave,
+                    "nome": cat.nome,
+                    "sigla": cat.sigla,
+                    "nome_pipe": cat.nome_pipe,
+                    "valor": str(celula.get("valor") or ""),
+                }
+            )
         )
     inst = {
         "codigo_instalacao": int(linha.get("codigo_instalacao") or 0),
@@ -250,6 +248,7 @@ def merge_instalacoes_hub(
             "razao_social": str(row.get("razao_social") or ""),
             "cidade": str(row.get("cidade") or ""),
             "uf": str(row.get("uf") or ""),
+            "ativo": bool(row.get("ativo", True)),
             "servicos": servicos,
         }
         inst["valor_uc"] = compute_valor_uc_str(inst)

@@ -564,6 +564,47 @@ def _validar_instalacoes_hub(
         _validar_instalacao_hub(codigo, codigo_cliente)
 
 
+def _ativar_instalacoes_hub_inativas(
+    cur,
+    codigos_instalacao: list[int],
+    codigo_cliente: int,
+) -> list[int]:
+    """
+    Marca Ativo='S' nas instalações do pedido que estiverem inativas no HUB.
+
+    Espelha o comportamento do desktop ao incluir UCs no pedido.
+    """
+    codigos = sorted({int(c) for c in codigos_instalacao if c})
+    if not codigos:
+        return []
+
+    placeholders = ",".join(["%s"] * len(codigos))
+    cur.execute(
+        f"""
+        SELECT CODIGO
+        FROM instalacao
+        WHERE COD_CLIENTE = %s
+          AND CODIGO IN ({placeholders})
+          AND COALESCE(Ativo, 'S') <> 'S'
+        """,
+        (codigo_cliente, *codigos),
+    )
+    inativas = [int(row[0]) for row in cur.fetchall()]
+    if not inativas:
+        return []
+
+    ph2 = ",".join(["%s"] * len(inativas))
+    cur.execute(
+        f"""
+        UPDATE instalacao
+        SET Ativo = 'S'
+        WHERE COD_CLIENTE = %s AND CODIGO IN ({ph2})
+        """,
+        (codigo_cliente, *inativas),
+    )
+    return inativas
+
+
 def _id_plune_recorrente_para_hub(deal_id: str) -> int | None:
     """Somente pedido Plune recorrente em pedido_plune (não implantação)."""
     numeros = obter_numeros_pedidos_plune_deal(deal_id)
@@ -747,6 +788,8 @@ def _resultado_pedido_hub(
     status: str,
     codigo_pedido: int,
     dados: dict[str, Any],
+    *,
+    instalacoes_ativadas: list[int] | None = None,
 ) -> dict[str, Any]:
     linhas_obs = dados["linhas_obs"]
     return {
@@ -755,6 +798,7 @@ def _resultado_pedido_hub(
         "pedido_hub_id": codigo_pedido,
         "codigo_cliente": dados["codigo_cliente"],
         "codigos_instalacao": dados["codigos_instalacao"],
+        "instalacoes_ativadas": list(instalacoes_ativadas or []),
         "instalacoes_obs": [
             {
                 "identificacao": linha.identificacao,
@@ -843,6 +887,10 @@ def criar_pedido_hub(
                 ),
             )
             codigo_pedido = int(cur.lastrowid)
+            codigos_uc_pedido = [linha.codigo_instalacao for linha in dados["linhas_obs"]]
+            instalacoes_ativadas = _ativar_instalacoes_hub_inativas(
+                cur, codigos_uc_pedido, dados["codigo_cliente"]
+            )
             _inserir_filhos_pedido_hub(
                 cur,
                 codigo_pedido,
@@ -853,7 +901,13 @@ def criar_pedido_hub(
             )
 
     marcar_hub_pedido_criado(deal_id, codigo_pedido)
-    return _resultado_pedido_hub(deal_id, "created", codigo_pedido, dados)
+    return _resultado_pedido_hub(
+        deal_id,
+        "created",
+        codigo_pedido,
+        dados,
+        instalacoes_ativadas=instalacoes_ativadas,
+    )
 
 
 def atualizar_pedido_hub(
@@ -931,6 +985,10 @@ def atualizar_pedido_hub(
                 "DELETE FROM pedido_plune WHERE codigoPedido=%s",
                 (codigo_pedido,),
             )
+            codigos_uc_pedido = [linha.codigo_instalacao for linha in dados["linhas_obs"]]
+            instalacoes_ativadas = _ativar_instalacoes_hub_inativas(
+                cur, codigos_uc_pedido, dados["codigo_cliente"]
+            )
             _inserir_filhos_pedido_hub(
                 cur,
                 codigo_pedido,
@@ -940,7 +998,13 @@ def atualizar_pedido_hub(
                 codigo_plune_recorrente=dados["codigo_plune_recorrente"],
             )
 
-    return _resultado_pedido_hub(deal_id, "updated", codigo_pedido, dados)
+    return _resultado_pedido_hub(
+        deal_id,
+        "updated",
+        codigo_pedido,
+        dados,
+        instalacoes_ativadas=instalacoes_ativadas,
+    )
 
 
 def sincronizar_pedido_hub_deal(

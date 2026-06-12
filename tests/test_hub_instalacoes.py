@@ -63,7 +63,25 @@ def test_consulta_com_instalacoes_marca_selecionadas_e_avisa_inexistentes():
     assert result.codigos_instalacao_selecionados == (665, 9999)
     assert result.instalacoes[0].selecionada is True
     assert result.instalacoes[1].selecionada is False
+    assert result.instalacoes[1].ativo is False
     assert result.codigos_nao_encontrados == (9999,)
+
+
+def test_consulta_mapeia_ativo_n_como_inativo():
+    mock_conn, _ = _mock_hub_rows(
+        [
+            (2652, 352, "", "UC inativa", "Pelotas", "RS", "N"),
+            (4216, 352, "4454554545", "UC ativa", "Pelotas", "RS", "S"),
+        ]
+    )
+    with patch("core.hub_instalacoes.hub_conn") as mock_hub:
+        mock_hub.return_value.__enter__.return_value = mock_conn
+        mock_hub.return_value.__exit__ = MagicMock(return_value=False)
+        result = consultar_instalacoes_hub("352")
+
+    by_codigo = {i.codigo: i.ativo for i in result.instalacoes}
+    assert by_codigo[2652] is False
+    assert by_codigo[4216] is True
 
 
 def test_consulta_rejeita_vazio():

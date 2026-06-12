@@ -89,6 +89,8 @@ export type HubInstalacaoPedido = {
   razao_social: string;
   cidade: string;
   uf: string;
+  /** Coluna ATIVO do HUB (S/N). */
+  ativo: boolean;
   valor_uc: string;
   servicos: HubServicoItem[];
 };

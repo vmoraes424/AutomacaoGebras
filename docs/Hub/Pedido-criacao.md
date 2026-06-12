@@ -37,6 +37,12 @@ No C#, após salvar, podem rodar stored procedures:
 
 A automação Python **ainda não** chama essas SPs; tickets podem ser criados manualmente ou em evolução futura.
 
+### Ativação de instalações inativas
+
+Ao **criar** ou **atualizar** pedido (`criar_pedido_hub` / `atualizar_pedido_hub`), cada UC incluída no pedido com `instalacao.Ativo <> 'S'` recebe `UPDATE instalacao SET Ativo = 'S'` na mesma transação do INSERT/UPDATE do pedido.
+
+Implementação: `_ativar_instalacoes_hub_inativas` em [`core/hub_pedido.py`](../../core/hub_pedido.py). O JSON de retorno inclui `instalacoes_ativadas` (lista de `CODIGO` alterados).
+
 ## Idempotência
 
 - Se `hub_pedido_criado = 1` no envelope → `skipped` / `hub_pedido_ja_criado`.

@@ -66,10 +66,23 @@ export function codigoClienteOnly(raw: string): string {
   return codigoCliente !== null ? String(codigoCliente) : raw.trim();
 }
 
-export function servicoItemAtivo(item: HubServicoItem): boolean {
-  if (!item.ativo) return false;
-  const n = parseMoneyBr(item.valor);
+export function servicoAtivoPorValor(valor: string): boolean {
+  const n = parseMoneyBr(valor);
   return n !== null && n > 0;
+}
+
+export function servicoItemAtivo(item: HubServicoItem): boolean {
+  return servicoAtivoPorValor(item.valor);
+}
+
+export function normalizeServicoItem(item: HubServicoItem): HubServicoItem {
+  const valor = String(item.valor ?? "");
+  return { ...item, valor, ativo: servicoAtivoPorValor(valor) };
+}
+
+export function servicoPatchFromValor(valor: string): Pick<HubServicoItem, "valor" | "ativo"> {
+  const v = String(valor ?? "");
+  return { valor: v, ativo: servicoAtivoPorValor(v) };
 }
 
 export function valorUcInstalacao(inst: HubInstalacaoPedido): number {
@@ -133,11 +146,11 @@ function mergeServicosInstalacao(
   const porChave = new Map((existentes ?? []).map((s) => [s.chave, s]));
   return catalogo.map((cat) => {
     const prev = porChave.get(cat.chave);
-    return {
+    return normalizeServicoItem({
       ...emptyHubServicoItem(cat),
-      ativo: Boolean(prev?.ativo),
       valor: String(prev?.valor ?? ""),
-    };
+      ativo: false,
+    });
   });
 }
 
@@ -148,11 +161,11 @@ function legacyUcLinhaParaInstalacao(
 ): HubInstalacaoPedido {
   const servicos = catalogo.map((cat) => {
     const celula = linha.servicos[cat.chave as UcServicoKey];
-    return {
+    return normalizeServicoItem({
       ...emptyHubServicoItem(cat),
-      ativo: Boolean(celula?.ativo),
       valor: String(celula?.valor ?? ""),
-    };
+      ativo: false,
+    });
   });
   const inst: HubInstalacaoPedido = {
     codigo_instalacao: linha.codigo_instalacao,
@@ -161,6 +174,7 @@ function legacyUcLinhaParaInstalacao(
     razao_social: linha.razao_social,
     cidade: linha.cidade,
     uf: linha.uf,
+    ativo: true,
     valor_uc: "",
     servicos,
   };
@@ -177,6 +191,7 @@ export function getHubInstalacoes(
   if (payload.hub.instalacoes?.length) {
     return payload.hub.instalacoes.map((inst) => ({
       ...inst,
+      ativo: inst.ativo ?? true,
       servicos: mergeServicosInstalacao(inst.servicos, cat),
       valor_uc: String(valorUcInstalacao({ ...inst, servicos: mergeServicosInstalacao(inst.servicos, cat) }) || ""),
     }));
@@ -251,6 +266,7 @@ export function mergeHubInstalacoes(
     razao_social: string;
     cidade: string;
     uf: string;
+    ativo: boolean;
   }>,
   codigoCliente: number,
   catalogo?: HubServicoCatalogo[],
@@ -268,6 +284,7 @@ export function mergeHubInstalacoes(
         razao_social: inst.razao_social,
         cidade: inst.cidade,
         uf: inst.uf,
+        ativo: inst.ativo,
         servicos: mergeServicosInstalacao(existing.servicos, cat),
       };
     }
@@ -278,6 +295,7 @@ export function mergeHubInstalacoes(
       razao_social: inst.razao_social,
       cidade: inst.cidade,
       uf: inst.uf,
+      ativo: inst.ativo,
       valor_uc: "",
       servicos: servicosTemplateFromCatalog(cat),
     };

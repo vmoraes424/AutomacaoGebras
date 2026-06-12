@@ -1142,7 +1142,7 @@ button.form-meta-chip--clickable:active {
   width: 100%;
   border: 1px solid var(--gebras-border-soft);
   border-radius: var(--gebras-radius-md);
-  --uc-col-1-w: 7.5rem;
+  --uc-col-1-w: 7.25rem;
   --uc-col-2-w: 11rem;
   --uc-sticky-1: 0;
   --uc-sticky-2: var(--uc-col-1-w);
@@ -1248,6 +1248,69 @@ button.form-meta-chip--clickable:active {
   width: var(--uc-col-1-w);
   white-space: nowrap;
   box-sizing: border-box;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+.uc-instalacao-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+.uc-instalacao-cell--inativa .uc-instalacao-cod {
+  color: var(--gebras-text-muted);
+}
+
+.uc-instalacao-cod {
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.uc-instalacao-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  min-width: 0;
+  padding: 0.06rem 0.32rem 0.06rem 0.22rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+
+.uc-instalacao-status-dot {
+  flex-shrink: 0;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-radius: 50%;
+}
+
+.uc-instalacao-status-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.uc-instalacao-status--ativa {
+  color: #1a5c36;
+  background: rgba(39, 174, 96, 0.08);
+  border-color: rgba(39, 174, 96, 0.22);
+}
+
+.uc-instalacao-status--ativa .uc-instalacao-status-dot {
+  background: #27ae60;
+}
+
+.uc-instalacao-status--inativa {
+  color: var(--gebras-text-muted);
+  background: rgba(95, 109, 121, 0.08);
+  border-color: rgba(95, 109, 121, 0.18);
+}
+
+.uc-instalacao-status--inativa .uc-instalacao-status-dot {
+  background: #95a5a6;
 }
 
 .uc-col-id {
@@ -1361,22 +1424,14 @@ button.form-meta-chip--clickable:active {
 
 .uc-servico-celula {
   display: flex;
-  flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  min-width: 6.25rem;
-}
-
-.uc-servico-check {
-  flex-direction: row;
-  align-items: center;
-  margin: 0;
+  min-width: 5.5rem;
 }
 
 .uc-servico-valor {
-  width: 4.75rem;
-  min-width: 4.75rem;
+  width: 5.25rem;
+  min-width: 5.25rem;
   padding: 0.3rem 0.4rem;
   font-size: 0.8rem;
   text-align: right;

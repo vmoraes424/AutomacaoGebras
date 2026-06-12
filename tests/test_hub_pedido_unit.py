@@ -8,6 +8,7 @@ import pytest
 from core.automacao_config import AutomacaoConfig
 from core.hub_pedido import (
     HubPedidoError,
+    _ativar_instalacoes_hub_inativas,
     _id_plune_recorrente_para_hub,
     _parse_codigos_notas,
     _parse_observacoes_uc_hub,
@@ -90,6 +91,23 @@ def test_p1_p2_campo_combinado_cliente_barra_instalacao():
         }
     }
     assert _p1_p2_do_deal(deal) == ([665, 1942], 352)
+
+
+def test_ativar_instalacoes_hub_inativas_atualiza_somente_inativas():
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [(2652,), (3013,)]
+    ativadas = _ativar_instalacoes_hub_inativas(cursor, [2652, 3013, 4216], 352)
+    assert ativadas == [2652, 3013]
+    update_sql = cursor.execute.call_args_list[-1][0][0]
+    assert "UPDATE instalacao" in update_sql
+    assert "Ativo = 'S'" in update_sql
+
+
+def test_ativar_instalacoes_hub_inativas_nada_a_fazer():
+    cursor = MagicMock()
+    cursor.fetchall.return_value = []
+    assert _ativar_instalacoes_hub_inativas(cursor, [665], 352) == []
+    assert cursor.execute.call_count == 1
 
 
 def test_erros_validacao_aceita_formato_cliente_barra_instalacao():
