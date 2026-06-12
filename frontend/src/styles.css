@@ -1031,16 +1031,24 @@ button.form-meta-chip--clickable:active {
 .form-back-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
   margin-bottom: 0.85rem;
+  padding: 0.45rem 0.95rem;
   font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--gebras-text-secondary);
+  font-weight: 700;
+  color: var(--gebras-dark-blue);
   text-decoration: none;
+  background: var(--gebras-surface-muted);
+  border: 1.5px solid var(--gebras-dark-blue);
+  border-radius: var(--gebras-radius-md);
+  box-shadow: var(--gebras-shadow-idle);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .form-back-link:hover {
-  color: var(--gebras-red);
+  color: #fff;
+  background: var(--gebras-dark-blue);
+  border-color: var(--gebras-dark-blue);
+  box-shadow: 0 4px 12px rgba(52, 73, 94, 0.22);
 }
 
 .form-page-header-top {
@@ -1484,6 +1492,15 @@ select:focus {
   outline: none;
   border-color: var(--gebras-red);
   box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.15);
+}
+
+input.field-readonly,
+input.field-readonly:focus {
+  background: var(--gebras-surface-muted);
+  border-color: var(--gebras-border-soft);
+  color: var(--gebras-dark-blue);
+  cursor: default;
+  box-shadow: none;
 }
 
 textarea {

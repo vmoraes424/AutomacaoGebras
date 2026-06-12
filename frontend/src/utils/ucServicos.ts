@@ -231,17 +231,22 @@ export function applyHubInstalacoes(
     };
   });
   const total = somaValoresHub(normalized);
+  const valorRecorrencia = total > 0 ? String(total) : "";
   return {
     ...payload,
     cliente: {
       ...payload.cliente,
       codigo_cliente_instalacao: deriveCodigoClienteInstalacao(codigoCliente, normalized),
     },
+    valores: {
+      ...payload.valores,
+      ...(valorRecorrencia ? { valor_recorrencia: valorRecorrencia } : {}),
+    },
     hub: {
       ...payload.hub,
       instalacoes: normalized,
       observacoes_detalhes: buildObservacoesDetalhesHub(normalized),
-      valor_total: total > 0 ? String(total) : "",
+      valor_total: valorRecorrencia,
     },
   };
 }
@@ -304,16 +309,43 @@ export function mergeHubInstalacoes(
   return applyHubInstalacoes(payload, rows, codigoCliente, cat);
 }
 
+export function syncValorRecorrenciaFromHub(
+  payload: FormPayloadV1,
+  catalogo?: HubServicoCatalogo[],
+): FormPayloadV1 {
+  const total = somaValoresHub(getHubInstalacoes(payload, catalogo));
+  if (total <= 0) return payload;
+  const valorRecorrencia = String(total);
+  if (
+    payload.valores.valor_recorrencia === valorRecorrencia &&
+    payload.hub.valor_total === valorRecorrencia
+  ) {
+    return payload;
+  }
+  return {
+    ...payload,
+    valores: { ...payload.valores, valor_recorrencia: valorRecorrencia },
+    hub: { ...payload.hub, valor_total: valorRecorrencia },
+  };
+}
+
 export function pipeFieldsFromUcMatrix(payload: FormPayloadV1): Array<{
   path: string;
   value: string | number;
 }> {
-  return [
+  const fields: Array<{ path: string; value: string | number }> = [
     {
       path: "cliente.codigo_cliente_instalacao",
       value: payload.cliente.codigo_cliente_instalacao,
     },
   ];
+  if (payload.valores.valor_recorrencia) {
+    fields.push({
+      path: "valores.valor_recorrencia",
+      value: payload.valores.valor_recorrencia,
+    });
+  }
+  return fields;
 }
 
 export function sumColunaServico(

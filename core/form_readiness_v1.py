@@ -73,11 +73,11 @@ READINESS_SECTIONS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Signatários",
         (
             "signatarios.email_assinante_contrato",
+            "signatarios.email_financeiro_contratante",
+            "signatarios.email_gestor_contratante",
             "signatarios.email_consultor_gebras",
             "signatarios.email_coordenador_gebras",
             "signatarios.email_diretor_gebras",
-            "signatarios.email_financeiro_contratante",
-            "signatarios.email_gestor_contratante",
         ),
     ),
     ("hub", "HUB", ("hub.observacoes_detalhes",)),

@@ -187,7 +187,7 @@ export function FormPageAside({
       <section className={`form-meta-card form-meta-readiness ${readyClass}`.trim()}>
         <div className="form-meta-readiness-top">
           <div>
-            <h2 className="form-meta-card-title">Prontidão para envio</h2>
+            <h2 className="form-meta-card-title">Validações para envio</h2>
             {readiness && (
               <p className="form-meta-readiness-sub">
                 {readiness.summary.completed} de {readiness.summary.total} itens

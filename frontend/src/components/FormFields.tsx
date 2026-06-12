@@ -130,6 +130,7 @@ function MoneyField({
   onFieldBlur,
   onFieldPulseEnd,
   disabled,
+  readOnly,
   fieldErrors,
   fieldSyncPulse,
 }: {
@@ -140,6 +141,7 @@ function MoneyField({
   onFieldBlur?: (fieldPath: string, value: string) => void;
   onFieldPulseEnd?: (fieldPath: string) => void;
   disabled?: boolean;
+  readOnly?: boolean;
   fieldErrors?: Record<string, string>;
   fieldSyncPulse?: Set<string>;
 }) {
@@ -147,6 +149,7 @@ function MoneyField({
   const valueAtFocus = useRef("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const locked = Boolean(disabled || readOnly);
 
   const shown = editing ? draft : formatMoneyBr(value);
 
@@ -158,19 +161,26 @@ function MoneyField({
         inputMode="decimal"
         value={shown}
         disabled={disabled}
+        readOnly={readOnly}
         aria-invalid={err ? true : undefined}
         aria-describedby={err ? `${fieldKey}-error` : undefined}
         className={composeFieldClass(fieldKey, {
           validationError: Boolean(err),
           fieldSyncPulse,
+          extra: readOnly ? "field-readonly" : undefined,
         })}
         onFocus={() => {
+          if (locked) return;
           valueAtFocus.current = moneyToStorage(value);
           setDraft(formatMoneyBr(value) || moneyToStorage(value));
           setEditing(true);
         }}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          if (locked) return;
+          setDraft(e.target.value);
+        }}
         onBlur={() => {
+          if (locked) return;
           setEditing(false);
           const parsed = parseMoneyBr(draft);
           const stored = parsed !== null ? moneyToStorage(parsed) : moneyToStorage(value);
@@ -904,11 +914,24 @@ export function ValoresDatasSection({ payload, onChange, disabled, fieldErrors, 
   const v = payload.valores;
   const d = payload.datas;
   const syncProps = { fieldSyncPulse, onFieldPulseEnd };
+  const totalRecorrencia = somaValoresHub(getHubInstalacoes(payload));
+  const valorRecorrencia =
+    totalRecorrencia > 0 ? String(totalRecorrencia) : v.valor_recorrencia;
   return (
     <section className="form-section" aria-labelledby="sec-valores">
       <h2 id="sec-valores">Valores e datas</h2>
       <div className="field-grid">
-        <MoneyField fieldKey="valores.valor_recorrencia" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Valor recorrência" value={v.valor_recorrencia} disabled={disabled} onChange={(val) => onChange({ ...payload, valores: { ...v, valor_recorrencia: val } })} {...syncProps} />
+        <MoneyField
+          fieldKey="valores.valor_recorrencia"
+          fieldErrors={fieldErrors}
+          onFieldBlur={onFieldBlur}
+          label="Valor recorrência"
+          value={valorRecorrencia}
+          readOnly
+          disabled={disabled}
+          onChange={() => {}}
+          {...syncProps}
+        />
         <MoneyField fieldKey="valores.valor_implantacao" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Valor implantação" value={v.valor_implantacao} disabled={disabled} onChange={(val) => onChange({ ...payload, valores: { ...v, valor_implantacao: val } })} {...syncProps} />
         <Field fieldKey="datas.data_pagamento_implantacao" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Data pag. implantação" type="date" value={d.data_pagamento_implantacao} disabled={disabled} onChange={(val) => onChange({ ...payload, datas: { ...d, data_pagamento_implantacao: val } })} {...syncProps} />
         <Field fieldKey="datas.data_primeira_cobranca" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Data 1ª cobrança mensal" type="date" value={d.data_primeira_cobranca} disabled={disabled} onChange={(val) => onChange({ ...payload, datas: { ...d, data_primeira_cobranca: val } })} {...syncProps} />
@@ -967,11 +990,11 @@ export function SignatariosSection({ payload, onChange, disabled, fieldErrors, o
   const { options: pipeOptions, loading: optionsLoading, error: optionsError } = usePipeFieldOptions();
   const fields: { key: keyof typeof s; label: string; fieldKey: string }[] = [
     { key: "email_assinante_contrato", label: "E-mail assinante contrato", fieldKey: "signatarios.email_assinante_contrato" },
+    { key: "email_financeiro_contratante", label: "E-mail financeiro contratante", fieldKey: "signatarios.email_financeiro_contratante" },
+    { key: "email_gestor_contratante", label: "E-mail gestor contratante", fieldKey: "signatarios.email_gestor_contratante" },
     { key: "email_consultor_gebras", label: "E-mail consultor Gebras", fieldKey: "signatarios.email_consultor_gebras" },
     { key: "email_coordenador_gebras", label: "E-mail coordenador Gebras", fieldKey: "signatarios.email_coordenador_gebras" },
     { key: "email_diretor_gebras", label: "E-mail diretor Gebras", fieldKey: "signatarios.email_diretor_gebras" },
-    { key: "email_financeiro_contratante", label: "E-mail financeiro contratante", fieldKey: "signatarios.email_financeiro_contratante" },
-    { key: "email_gestor_contratante", label: "E-mail gestor contratante", fieldKey: "signatarios.email_gestor_contratante" },
   ];
   return (
     <section className="form-section" aria-labelledby="sec-signatarios">

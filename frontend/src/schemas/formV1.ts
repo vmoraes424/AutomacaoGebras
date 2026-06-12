@@ -1,4 +1,5 @@
 import type { FormPayloadV1 } from "../api/types";
+import { syncValorRecorrenciaFromHub } from "../utils/ucServicos";
 
 /** Payload vazio alinhado a tests/fixtures/formulario_v1/form_payload_v1_g1.json */
 export function emptyFormPayloadV1(): FormPayloadV1 {
@@ -58,7 +59,7 @@ export function emptyFormPayloadV1(): FormPayloadV1 {
 export function mergeFormPayloadV1(saved: Partial<FormPayloadV1> | undefined): FormPayloadV1 {
   const base = emptyFormPayloadV1();
   if (!saved) return base;
-  return {
+  const merged: FormPayloadV1 = {
     ...base,
     ...saved,
     cliente: { ...base.cliente, ...saved.cliente },
@@ -77,4 +78,5 @@ export function mergeFormPayloadV1(saved: Partial<FormPayloadV1> | undefined): F
       instalacoes: saved.hub?.instalacoes ?? base.hub.instalacoes,
     },
   };
+  return syncValorRecorrenciaFromHub(merged);
 }

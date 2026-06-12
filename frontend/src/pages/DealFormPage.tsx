@@ -310,7 +310,7 @@ export function DealFormPage() {
     <div className="layout layout-form">
       <header className="form-page-header">
         <Link className="form-back-link" to={`/deals/${ownerId}`} state={{ ownerName }}>
-          ← Voltar aos cards
+          Voltar
         </Link>
         <div className="form-page-header-top">
           <span className="form-deal-id">#{dealId}</span>

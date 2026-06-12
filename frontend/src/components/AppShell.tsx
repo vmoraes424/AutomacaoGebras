@@ -13,7 +13,8 @@ export function AppShell({ children }: AppShellProps) {
           <div className="app-brand">
             <h1 className="app-brand-title">Portal de Automação Comercial</h1>
             <p className="app-brand-subtitle">
-              Contratos <span aria-hidden>·</span> Pipedrive <span aria-hidden>·</span> HUB
+              Pipedrive <span aria-hidden>·</span> ClickSign <span aria-hidden>·</span> Plune{" "}
+              <span aria-hidden>·</span> HUB
             </p>
           </div>
           <nav className="app-header-nav" aria-label="Configurações">

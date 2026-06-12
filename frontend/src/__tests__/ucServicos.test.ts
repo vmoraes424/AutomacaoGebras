@@ -48,6 +48,7 @@ describe("ucServicos", () => {
     expect(next.servicos.quantidade_ucs).toBe(5);
     expect(next.hub.observacoes_detalhes).toContain("SOLE WEB");
     expect(next.hub.valor_total).toBe("1000");
+    expect(next.valores.valor_recorrencia).toBe("1000");
     expect(next.hub.instalacoes[0].valor_uc).toBe("1000");
     expect(next.cliente.codigo_cliente_instalacao).toBe("352/665");
     expect(somaValoresHub(next.hub.instalacoes)).toBe(1000);
@@ -88,6 +89,7 @@ describe("ucServicos", () => {
     ], 352);
     expect(next.hub.instalacoes[0].servicos.find((s) => s.chave === "sole_web")?.codigo_servico).toBe(2);
     expect(next.hub.valor_total).toBe("1950");
+    expect(next.valores.valor_recorrencia).toBe("1950");
   });
 
   it("mergeHubInstalacoes atualiza ativo do HUB sem perder serviços salvos", () => {
@@ -126,10 +128,32 @@ describe("ucServicos", () => {
     expect(next.hub.instalacoes[0].servicos.length).toBe(servicos.length);
   });
 
-  it("pipeFieldsFromUcMatrix so envia codigo cliente/instalacao", () => {
+  it("pipeFieldsFromUcMatrix envia codigo cliente/instalacao e valor recorrencia", () => {
     const payload = applyHubInstalacoes(emptyFormPayloadV1(), [], 352);
     expect(pipeFieldsFromUcMatrix(payload)).toEqual([
       { path: "cliente.codigo_cliente_instalacao", value: "352" },
+    ]);
+
+    const comValor = applyHubInstalacoes(emptyFormPayloadV1(), [
+      {
+        codigo_instalacao: 665,
+        codigo_cliente: 352,
+        identificacao: "00665",
+        razao_social: "",
+        cidade: "",
+        uf: "",
+        valor_uc: "",
+        servicos: (() => {
+          const servicos = servicosTemplateHub(HUB_SERVICOS_CATALOGO_FALLBACK);
+          const sw = servicos.find((s) => s.chave === "sole_web")!;
+          sw.valor = "6480";
+          return servicos;
+        })(),
+      },
+    ], 352);
+    expect(pipeFieldsFromUcMatrix(comValor)).toEqual([
+      { path: "cliente.codigo_cliente_instalacao", value: "352/665" },
+      { path: "valores.valor_recorrencia", value: "6480" },
     ]);
   });
 });
