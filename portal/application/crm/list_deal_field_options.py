@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any, Callable
 
 
-def _default_lookup() -> dict[str, list[dict[str, Any]]]:
+def _default_lookup(*, fresh: bool = False) -> dict[str, list[dict[str, Any]]]:
     from core.form_schema_v1 import list_form_enum_field_options
 
-    return list_form_enum_field_options()
+    return list_form_enum_field_options(fresh=fresh)
 
 
 class ListPipedriveDealFieldOptions:
@@ -18,5 +18,5 @@ class ListPipedriveDealFieldOptions:
     ) -> None:
         self._lookup = lookup or _default_lookup
 
-    def execute(self) -> dict[str, Any]:
-        return {"fields": self._lookup()}
+    def execute(self, *, fresh: bool = False) -> dict[str, Any]:
+        return {"fields": self._lookup(fresh=fresh)}

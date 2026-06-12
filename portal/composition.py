@@ -70,6 +70,9 @@ class PortalContainer:
         if isinstance(repo, MemoryDealFormRepository):
             repo.clear()
         self.crm_reader.invalidate_crm_cache()
+        from core.pipedrive_fields import invalidate_deal_field_options_cache
+
+        invalidate_deal_field_options_cache()
 
 
 def build_container() -> PortalContainer:

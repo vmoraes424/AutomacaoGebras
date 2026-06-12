@@ -38,7 +38,7 @@ async function configRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
-const PIPE_FIELD_OPTIONS_TTL_MS = 30 * 60 * 1000;
+const PIPE_FIELD_OPTIONS_TTL_MS = 30 * 1000;
 
 const inflightGetForm = new Map<string, Promise<FormRecord>>();
 
@@ -89,11 +89,14 @@ export const api = {
       request<CrmDeal[]>(`/pipedrive/deals?owner_user_id=${ownerUserId}`),
     ),
 
-  getDealFieldOptions: () =>
+  getDealFieldOptions: (opts?: { fresh?: boolean }) =>
     fetchWithApiCache(
       cacheKey("/pipedrive/deal-field-options"),
       async () => {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (opts?.fresh) {
+          headers["X-Portal-Fresh"] = "1";
+        }
         const response = await fetch(`${API_BASE}/pipedrive/deal-field-options`, { headers });
         if (response.status === 404) {
           throw new Error(

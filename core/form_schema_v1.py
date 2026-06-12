@@ -250,17 +250,17 @@ def form_enum_field_paths() -> dict[str, str]:
     }
 
 
-def list_form_enum_field_options() -> dict[str, list[dict[str, int | str]]]:
+def list_form_enum_field_options(*, fresh: bool = False) -> dict[str, list[dict[str, int | str]]]:
     """Opções dos selects do form — catálogo dealFields v2 (id + label)."""
     from .pipedrive_fields import (
         _enum_option_labels_for_field,
         warm_deal_field_options_cache,
     )
 
-    warm_deal_field_options_cache()
+    warm_deal_field_options_cache(fresh=fresh)
     out: dict[str, list[dict[str, int | str]]] = {}
     for path, field_code in form_enum_field_paths().items():
-        labels = _enum_option_labels_for_field(field_code)
+        labels = _enum_option_labels_for_field(field_code, fresh=fresh)
         opcoes = [
             {"id": int(opt_id), "label": label}
             for opt_id, label in labels.items()

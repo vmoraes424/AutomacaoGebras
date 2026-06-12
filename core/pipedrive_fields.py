@@ -1,4 +1,6 @@
 import re
+import threading
+import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -234,6 +236,17 @@ def get_val(deal_data: dict, code: str) -> str:
 
 
 _enum_option_labels: dict[str, dict[str, str]] | None = None
+_enum_option_labels_expires_at: float = 0.0
+_enum_option_labels_lock = threading.Lock()
+_ENUM_OPTION_LABELS_TTL_SEC = 30.0
+
+
+def invalidate_deal_field_options_cache() -> None:
+    """Força nova leitura dealFields v2 na próxima consulta."""
+    global _enum_option_labels, _enum_option_labels_expires_at
+    with _enum_option_labels_lock:
+        _enum_option_labels = None
+        _enum_option_labels_expires_at = 0.0
 
 
 def _load_enum_option_labels_from_api() -> dict[str, dict[str, str]] | None:
@@ -272,22 +285,35 @@ def _load_enum_option_labels_from_api() -> dict[str, dict[str, str]] | None:
     return result
 
 
-def _enum_option_labels_for_field(field_code: str) -> dict[str, str]:
-    """Mapeia id da opção (str) -> label (dealFields v2)."""
-    global _enum_option_labels
-    if _enum_option_labels is None:
-        loaded = _load_enum_option_labels_from_api()
-        if loaded is None:
-            return {}
+def _ensure_enum_option_labels_loaded(*, fresh: bool = False) -> dict[str, dict[str, str]] | None:
+    global _enum_option_labels, _enum_option_labels_expires_at
+    with _enum_option_labels_lock:
+        if (
+            not fresh
+            and _enum_option_labels is not None
+            and time.monotonic() < _enum_option_labels_expires_at
+        ):
+            return _enum_option_labels
+    loaded = _load_enum_option_labels_from_api()
+    if loaded is None:
+        return None
+    with _enum_option_labels_lock:
         _enum_option_labels = loaded
-    return _enum_option_labels.get(field_code, {})
+        _enum_option_labels_expires_at = time.monotonic() + _ENUM_OPTION_LABELS_TTL_SEC
+    return loaded
 
 
-def warm_deal_field_options_cache() -> None:
+def _enum_option_labels_for_field(field_code: str, *, fresh: bool = False) -> dict[str, str]:
+    """Mapeia id da opção (str) -> label (dealFields v2)."""
+    labels = _ensure_enum_option_labels_loaded(fresh=fresh)
+    if labels is None:
+        return {}
+    return labels.get(field_code, {})
+
+
+def warm_deal_field_options_cache(*, fresh: bool = False) -> None:
     """Pre-carrega catálogo enum/set do Pipedrive (evita latência no 1º blur)."""
-    if _enum_option_labels is not None:
-        return
-    _enum_option_labels_for_field(FIELD_FILIAL)
+    _enum_option_labels_for_field(FIELD_FILIAL, fresh=fresh)
 
 
 def _label_to_option_id(field_code: str, label: str) -> str | None:

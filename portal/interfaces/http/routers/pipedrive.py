@@ -29,9 +29,11 @@ def list_users(
 @router.get("/deal-field-options", response_model=PipedriveDealFieldOptionsOut)
 def list_deal_field_options(
     c: PortalContainer = Depends(container),
+    x_portal_fresh: str | None = Header(default=None, alias="X-Portal-Fresh"),
 ) -> dict:
     try:
-        return c.list_deal_field_options.execute()
+        fresh = x_portal_fresh == "1"
+        return c.list_deal_field_options.execute(fresh=fresh)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

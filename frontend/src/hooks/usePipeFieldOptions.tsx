@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, peekApiCache } from "../api/client";
+import { api, invalidateApiCache, peekApiCache } from "../api/client";
 import type { PipedriveDealFieldOptions, PipedriveFieldOption } from "../api/types";
 
 export const PIPE_FIELD_OPTIONS_CACHE_KEY = "/pipedrive/deal-field-options";
@@ -33,10 +33,11 @@ export function PipeFieldOptionsProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     let cancelled = false;
-    if (!cached) setLoading(true);
+    invalidateApiCache(PIPE_FIELD_OPTIONS_CACHE_KEY);
+    setLoading(true);
 
     api
-      .getDealFieldOptions()
+      .getDealFieldOptions({ fresh: true })
       .then((res) => {
         if (!cancelled) setOptions(res.fields ?? {});
       })

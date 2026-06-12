@@ -41,6 +41,38 @@ def test_list_deal_field_options(client):
     assert response.json() == {"fields": mock_fields}
 
 
+def test_deal_field_options_fresh_header_bypasses_backend_cache(client):
+    from core.pipedrive_fields import invalidate_deal_field_options_cache
+
+    invalidate_deal_field_options_cache()
+    fetch_count = {"n": 0}
+
+    def load_from_api():
+        fetch_count["n"] += 1
+        return {"field-a": {"1": "A"}}
+
+    with patch(
+        "core.pipedrive_fields._load_enum_option_labels_from_api",
+        side_effect=load_from_api,
+    ):
+        assert client.get("/pipedrive/deal-field-options").status_code == 200
+        assert fetch_count["n"] == 1
+
+        assert client.get("/pipedrive/deal-field-options").status_code == 200
+        assert fetch_count["n"] == 1
+
+        assert (
+            client.get(
+                "/pipedrive/deal-field-options",
+                headers={"X-Portal-Fresh": "1"},
+            ).status_code
+            == 200
+        )
+        assert fetch_count["n"] == 2
+
+    invalidate_deal_field_options_cache()
+
+
 def test_list_users(client):
     mock_users = [
         CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),
