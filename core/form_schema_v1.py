@@ -37,6 +37,8 @@ from .pipedrive_fields import (
     FIELD_SUBCENTRO_NIVEL_3,
     FIELD_VALOR_IMPLANTACAO,
     FIELD_VALOR_MENSAL,
+    PIPE_FIELDS_ENUM,
+    PIPE_FIELDS_SET,
 )
 
 
@@ -237,3 +239,33 @@ def form_payload_to_deal_dict(deal_id: int, payload: FormPayloadV1) -> dict[str,
         else:
             cf[pipe_hash] = str(value or "")
     return {"id": deal_id, "custom_fields": cf}
+
+
+def form_enum_field_paths() -> dict[str, str]:
+    """Caminhos do formulário v1 mapeados a campos enum/set (select) no Pipedrive."""
+    return {
+        path: code
+        for path, code in FORM_PATH_TO_PIPE.items()
+        if code in PIPE_FIELDS_ENUM or code in PIPE_FIELDS_SET
+    }
+
+
+def list_form_enum_field_options() -> dict[str, list[dict[str, int | str]]]:
+    """Opções dos selects do form — catálogo dealFields v2 (id + label)."""
+    from .pipedrive_fields import (
+        _enum_option_labels_for_field,
+        warm_deal_field_options_cache,
+    )
+
+    warm_deal_field_options_cache()
+    out: dict[str, list[dict[str, int | str]]] = {}
+    for path, field_code in form_enum_field_paths().items():
+        labels = _enum_option_labels_for_field(field_code)
+        opcoes = [
+            {"id": int(opt_id), "label": label}
+            for opt_id, label in labels.items()
+            if label
+        ]
+        opcoes.sort(key=lambda item: str(item["label"]).casefold())
+        out[path] = opcoes
+    return out

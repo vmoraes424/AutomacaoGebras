@@ -1539,7 +1539,8 @@ textarea {
 
 .field-error,
 .field-has-error input.field-error,
-.field-has-error textarea.field-error {
+.field-has-error textarea.field-error,
+.field-has-error select.field-error {
   border-color: var(--gebras-red);
   box-shadow: 0 0 0 1px rgba(231, 76, 60, 0.25);
 }
@@ -1570,7 +1571,8 @@ textarea {
 }
 
 input.field-sync-pulse,
-textarea.field-sync-pulse {
+textarea.field-sync-pulse,
+select.field-sync-pulse {
   animation: field-sync-pulse 0.85s cubic-bezier(0.25, 0.9, 0.35, 1);
 }
 

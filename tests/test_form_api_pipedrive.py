@@ -22,6 +22,25 @@ def _snapshot(users: list[CrmUser], deals: list[CrmDeal]) -> ContratoSnapshot:
     return ContratoSnapshot(deals=tuple(deals), users=tuple(users))
 
 
+def test_list_deal_field_options(client):
+    mock_fields = {
+        "comercial.filial": [{"id": 1, "label": "Matriz"}],
+        "comercial.regional": [{"id": 10, "label": "Regional1"}],
+        "comercial.consultor": [{"id": 20, "label": "Alinne de Matos Alves"}],
+        "comercial.percentual_exito": [{"id": 30, "label": "20%"}],
+        "signatarios.email_consultor_gebras": [{"id": 84, "label": "vkbederode@gmail.com"}],
+        "signatarios.email_coordenador_gebras": [{"id": 81, "label": "vinicius.bederode@gebras.com"}],
+        "signatarios.email_diretor_gebras": [{"id": 80, "label": "pedro.terra@gebras.com"}],
+    }
+    with patch(
+        "portal.application.crm.list_deal_field_options._default_lookup",
+        return_value=mock_fields,
+    ):
+        response = client.get("/pipedrive/deal-field-options")
+    assert response.status_code == 200
+    assert response.json() == {"fields": mock_fields}
+
+
 def test_list_users(client):
     mock_users = [
         CrmUser(id=1, name="Alice", email="alice@gebras.com.br"),

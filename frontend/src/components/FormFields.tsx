@@ -21,6 +21,7 @@ import {
 } from "../utils/ucServicos";
 import { formatDisplayName } from "../utils/formatDisplayName";
 import { joinCidadeEstado, splitCidadeEstado } from "../utils/cidadeEstado";
+import { usePipeFieldOptions } from "../hooks/usePipeFieldOptions";
 import {
   composeFieldClass,
   fieldError,
@@ -281,6 +282,77 @@ function MunicipioEstadoFields({
         )}
       </label>
     </>
+  );
+}
+
+function PipeSelectField({
+  label,
+  fieldKey,
+  value,
+  options,
+  loading,
+  onChange,
+  onFieldBlur,
+  onFieldPulseEnd,
+  disabled,
+  fieldErrors,
+  fieldSyncPulse,
+}: {
+  label: string;
+  fieldKey: string;
+  value: string;
+  options: { id: number; label: string }[];
+  loading?: boolean;
+  onChange: (v: string) => void;
+  onFieldBlur?: (fieldPath: string, value: string) => void;
+  onFieldPulseEnd?: (fieldPath: string) => void;
+  disabled?: boolean;
+  fieldErrors?: Record<string, string>;
+  fieldSyncPulse?: Set<string>;
+}) {
+  const err = fieldError(fieldErrors, fieldKey);
+  const known = options.some((opt) => opt.label === value);
+
+  const handleChange = (next: string) => {
+    onChange(next);
+    if (next !== value) {
+      onFieldBlur?.(fieldKey, next);
+    }
+  };
+
+  return (
+    <label className={err ? "field-has-error" : undefined}>
+      {label}
+      <select
+        value={value}
+        disabled={disabled || loading}
+        aria-invalid={err ? true : undefined}
+        aria-describedby={err ? `${fieldKey}-error` : undefined}
+        className={composeFieldClass(fieldKey, {
+          validationError: Boolean(err),
+          fieldSyncPulse,
+        })}
+        onChange={(e) => handleChange(e.target.value)}
+        onAnimationEnd={(e) => handleFieldPulseAnimationEnd(e, fieldKey, onFieldPulseEnd)}
+      >
+        <option value="">{loading ? "Carregando…" : "Selecione…"}</option>
+        {value && !known && (
+          <option value={value}>
+            {value} (atual)
+          </option>
+        )}
+        {options.map((opt) => (
+          <option key={opt.id} value={opt.label}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      {err && (
+        <span id={`${fieldKey}-error`} className="field-error-msg" role="alert">
+          {err}
+        </span>
+      )}
+    </label>
   );
 }
 
@@ -841,14 +913,38 @@ export function ComercialSection({ payload, onChange, disabled, fieldErrors, onF
   const set = (key: keyof typeof c, value: string) =>
     onChange({ ...payload, comercial: { ...c, [key]: value } });
   const syncProps = { fieldSyncPulse, onFieldPulseEnd };
+  const { options: pipeOptions, loading: optionsLoading } = usePipeFieldOptions();
+
+  const selectFields: {
+    key: keyof typeof c;
+    fieldKey: string;
+    label: string;
+  }[] = [
+    { key: "filial", fieldKey: "comercial.filial", label: "Filial" },
+    { key: "regional", fieldKey: "comercial.regional", label: "Regional" },
+    { key: "consultor", fieldKey: "comercial.consultor", label: "Consultor" },
+    { key: "percentual_exito", fieldKey: "comercial.percentual_exito", label: "Porcentagem de êxito" },
+  ];
+
   return (
     <section className="form-section" aria-labelledby="sec-comercial">
       <h2 id="sec-comercial">Comercial</h2>
       <div className="field-grid">
-        <Field fieldKey="comercial.filial" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Filial" value={c.filial} disabled={disabled} onChange={(v) => set("filial", v)} {...syncProps} />
-        <Field fieldKey="comercial.regional" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Regional" value={c.regional} disabled={disabled} onChange={(v) => set("regional", v)} {...syncProps} />
-        <Field fieldKey="comercial.consultor" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Consultor" value={c.consultor} disabled={disabled} onChange={(v) => set("consultor", v)} {...syncProps} />
-        <Field fieldKey="comercial.percentual_exito" fieldErrors={fieldErrors} onFieldBlur={onFieldBlur} label="Porcentagem de êxito" value={c.percentual_exito} disabled={disabled} onChange={(v) => set("percentual_exito", v)} {...syncProps} />
+        {selectFields.map(({ key, fieldKey, label }) => (
+          <PipeSelectField
+            key={fieldKey}
+            fieldKey={fieldKey}
+            fieldErrors={fieldErrors}
+            onFieldBlur={onFieldBlur}
+            label={label}
+            value={c[key]}
+            options={pipeOptions[fieldKey] ?? []}
+            loading={optionsLoading}
+            disabled={disabled}
+            onChange={(v) => set(key, v)}
+            {...syncProps}
+          />
+        ))}
       </div>
     </section>
   );
@@ -858,6 +954,7 @@ export function SignatariosSection({ payload, onChange, disabled, fieldErrors, o
   const s = payload.signatarios;
   const set = (key: keyof typeof s, value: string) =>
     onChange({ ...payload, signatarios: { ...s, [key]: value } });
+  const { options: pipeOptions, loading: optionsLoading } = usePipeFieldOptions();
   const fields: { key: keyof typeof s; label: string; fieldKey: string }[] = [
     { key: "email_assinante_contrato", label: "E-mail assinante contrato", fieldKey: "signatarios.email_assinante_contrato" },
     { key: "email_consultor_gebras", label: "E-mail consultor Gebras", fieldKey: "signatarios.email_consultor_gebras" },
@@ -870,21 +967,42 @@ export function SignatariosSection({ payload, onChange, disabled, fieldErrors, o
     <section className="form-section" aria-labelledby="sec-signatarios">
       <h2 id="sec-signatarios">Signatários</h2>
       <div className="field-grid">
-        {fields.map(({ key, label, fieldKey }) => (
-          <Field
-            key={key}
-            fieldKey={fieldKey}
-            fieldErrors={fieldErrors}
-            fieldSyncPulse={fieldSyncPulse}
-            onFieldBlur={onFieldBlur}
-            onFieldPulseEnd={onFieldPulseEnd}
-            label={label}
-            type="email"
-            value={s[key]}
-            disabled={disabled}
-            onChange={(v) => set(key, v)}
-          />
-        ))}
+        {fields.map(({ key, label, fieldKey }) => {
+          const selectOptions = pipeOptions[fieldKey] ?? [];
+          if (selectOptions.length > 0) {
+            return (
+              <PipeSelectField
+                key={key}
+                fieldKey={fieldKey}
+                fieldErrors={fieldErrors}
+                fieldSyncPulse={fieldSyncPulse}
+                onFieldBlur={onFieldBlur}
+                onFieldPulseEnd={onFieldPulseEnd}
+                label={label}
+                value={s[key]}
+                options={selectOptions}
+                loading={optionsLoading}
+                disabled={disabled}
+                onChange={(v) => set(key, v)}
+              />
+            );
+          }
+          return (
+            <Field
+              key={key}
+              fieldKey={fieldKey}
+              fieldErrors={fieldErrors}
+              fieldSyncPulse={fieldSyncPulse}
+              onFieldBlur={onFieldBlur}
+              onFieldPulseEnd={onFieldPulseEnd}
+              label={label}
+              type="email"
+              value={s[key]}
+              disabled={disabled}
+              onChange={(v) => set(key, v)}
+            />
+          );
+        })}
       </div>
     </section>
   );

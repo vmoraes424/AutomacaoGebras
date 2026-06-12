@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
-from core.form_schema_v1 import form_payload_to_deal_dict, parse_form_payload_v1
+from core.form_schema_v1 import (
+    form_enum_field_paths,
+    form_payload_to_deal_dict,
+    list_form_enum_field_options,
+    parse_form_payload_v1,
+)
 from core.form_validation_v1 import validate_form_payload_v1
 from core.pipedrive_fields import (
     FIELD_DATA_PAGAMENTO_IMPLANTACAO,
@@ -222,3 +227,45 @@ class TestValidateFormPayloadV1:
             for p in patches:
                 p.stop()
         assert "anexos.proposta_comercial_anexada" in errors
+
+
+def test_form_enum_field_paths_inclui_comercial():
+    paths = form_enum_field_paths()
+    assert paths["comercial.filial"]
+    assert paths["comercial.regional"]
+    assert paths["comercial.consultor"]
+    assert paths["comercial.percentual_exito"]
+    assert paths["signatarios.email_consultor_gebras"]
+    assert paths["signatarios.email_coordenador_gebras"]
+    assert paths["signatarios.email_diretor_gebras"]
+    assert "cliente.contratante" not in paths
+    assert "signatarios.email_assinante_contrato" not in paths
+
+
+@patch("core.pipedrive_fields._enum_option_labels_for_field")
+def test_list_form_enum_field_options(mock_labels):
+    from core.pipedrive_fields import (
+        FIELD_EMAIL_CONSULTOR_GEBRAS,
+        FIELD_EMAIL_COORDENADOR_GEBRAS,
+        FIELD_EMAIL_DIRETOR_GEBRAS,
+        FIELD_FILIAL,
+        FIELD_PERCENTUAL_EXITO,
+        FIELD_REGIONAL,
+        FIELD_SUBCENTRO_NIVEL_3,
+    )
+
+    mock_labels.side_effect = lambda code: {
+        FIELD_FILIAL: {"1": "Matriz"},
+        FIELD_REGIONAL: {"10": "Regional1"},
+        FIELD_SUBCENTRO_NIVEL_3: {"20": "Consultor A"},
+        FIELD_PERCENTUAL_EXITO: {"30": "20%"},
+        FIELD_EMAIL_CONSULTOR_GEBRAS: {"84": "consultor@gebras.com"},
+        FIELD_EMAIL_COORDENADOR_GEBRAS: {"81": "coordenador@gebras.com"},
+        FIELD_EMAIL_DIRETOR_GEBRAS: {"80": "diretor@gebras.com"},
+    }.get(code, {})
+    out = list_form_enum_field_options()
+    assert out["comercial.filial"] == [{"id": 1, "label": "Matriz"}]
+    assert out["comercial.percentual_exito"] == [{"id": 30, "label": "20%"}]
+    assert out["signatarios.email_consultor_gebras"] == [
+        {"id": 84, "label": "consultor@gebras.com"}
+    ]

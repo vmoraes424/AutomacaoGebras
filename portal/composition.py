@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from portal.application.crm.list_deal_field_options import ListPipedriveDealFieldOptions
 from portal.application.crm.list_deals_contrato import ListDealsContrato
 from portal.application.crm.list_deals_enriched import ListDealsContratoEnriched
 from portal.application.crm.list_users import ListCrmUsers
@@ -58,6 +59,7 @@ class PortalContainer:
     get_deal_form_readiness: GetDealFormReadiness
     get_deal_form_attachments: GetDealFormAttachments
     list_crm_users: ListCrmUsers
+    list_deal_field_options: ListPipedriveDealFieldOptions
     list_deals_contrato: ListDealsContrato
     list_deals_enriched: ListDealsContratoEnriched
     list_hub_instalacoes: ListHubInstalacoes
@@ -96,6 +98,7 @@ def build_container() -> PortalContainer:
         get_deal_form_readiness=GetDealFormReadiness(),
         get_deal_form_attachments=GetDealFormAttachments(),
         list_crm_users=ListCrmUsers(crm_reader),
+        list_deal_field_options=ListPipedriveDealFieldOptions(),
         list_deals_contrato=ListDealsContrato(crm_reader),
         list_deals_enriched=ListDealsContratoEnriched(
             ListDealsContrato(crm_reader),

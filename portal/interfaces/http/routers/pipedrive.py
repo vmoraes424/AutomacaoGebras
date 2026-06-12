@@ -5,7 +5,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from portal.composition import PortalContainer
 from portal.domain.crm.exceptions import CrmReadError
 from portal.interfaces.http.dependencies import container
-from portal.interfaces.http.schemas.pipedrive import PipedriveDealSummary, PipedriveUserOut
+from portal.interfaces.http.schemas.pipedrive import (
+    PipedriveDealFieldOptionsOut,
+    PipedriveDealSummary,
+    PipedriveUserOut,
+)
 
 router = APIRouter(prefix="/pipedrive", tags=["pipedrive"])
 
@@ -20,6 +24,13 @@ def list_users(
         return [user.to_dict() for user in c.list_crm_users.execute(fresh=fresh)]
     except CrmReadError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/deal-field-options", response_model=PipedriveDealFieldOptionsOut)
+def list_deal_field_options(
+    c: PortalContainer = Depends(container),
+) -> dict:
+    return c.list_deal_field_options.execute()
 
 
 @router.get("/deals", response_model=list[PipedriveDealSummary])

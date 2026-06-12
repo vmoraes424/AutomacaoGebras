@@ -23,3 +23,12 @@ class PipedriveDealSummary(BaseModel):
     operational_label: str = "pendente"
     ready_for_form: bool = True
     ready_for_automation: bool = False
+
+
+class PipedriveFieldOptionOut(BaseModel):
+    id: int
+    label: str
+
+
+class PipedriveDealFieldOptionsOut(BaseModel):
+    fields: dict[str, list[PipedriveFieldOptionOut]]

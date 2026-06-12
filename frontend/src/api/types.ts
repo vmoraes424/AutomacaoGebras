@@ -5,6 +5,15 @@ export type CrmUser = {
   deals_contrato_count: number;
 };
 
+export type PipedriveFieldOption = {
+  id: number;
+  label: string;
+};
+
+export type PipedriveDealFieldOptions = {
+  fields: Record<string, PipedriveFieldOption[]>;
+};
+
 export type OperationalLabel =
   | "pendente"
   | "rascunho"

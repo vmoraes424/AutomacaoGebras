@@ -8,6 +8,7 @@ import type {
   FormRecord,
   HubInstalacoesResponse,
   HubServicosResponse,
+  PipedriveDealFieldOptions,
 } from "./types";
 import {
   fetchWithApiCache,
@@ -84,6 +85,11 @@ export const api = {
   listDeals: (ownerUserId: number) =>
     fetchWithApiCache(cacheKey(`/pipedrive/deals?owner_user_id=${ownerUserId}`), () =>
       request<CrmDeal[]>(`/pipedrive/deals?owner_user_id=${ownerUserId}`),
+    ),
+
+  getDealFieldOptions: () =>
+    fetchWithApiCache(cacheKey("/pipedrive/deal-field-options"), () =>
+      request<PipedriveDealFieldOptions>("/pipedrive/deal-field-options"),
     ),
 
   getHubServicos: () =>

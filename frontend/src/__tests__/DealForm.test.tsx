@@ -35,6 +35,23 @@ describe("DealFormPage", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
         const url = fetchUrl(input);
+        if (url.includes("/deal-field-options")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                fields: {
+                  "comercial.filial": [{ id: 1, label: "Matriz" }],
+                  "comercial.regional": [{ id: 2, label: "Regional1" }],
+                  "comercial.consultor": [{ id: 3, label: "Consultor X" }],
+                  "comercial.percentual_exito": [{ id: 4, label: "20%" }],
+                  "signatarios.email_consultor_gebras": [{ id: 84, label: "consultor@gebras.com" }],
+                  "signatarios.email_coordenador_gebras": [{ id: 81, label: "coordenador@gebras.com" }],
+                  "signatarios.email_diretor_gebras": [{ id: 80, label: "diretor@gebras.com" }],
+                },
+              }),
+          });
+        }
         if (url.includes("/hub/instalacoes")) {
           return Promise.resolve({
             ok: true,
@@ -171,6 +188,6 @@ describe("DealFormPage", () => {
     await user.click(screen.getByRole("button", { name: /Enviar formulário/i }));
     expect(await screen.findByText(/signatarios.email_diretor_gebras/i)).toBeInTheDocument();
     expect(await screen.findByText("obrigatório")).toBeInTheDocument();
-    expect(document.querySelector("input.field-error")).toBeTruthy();
+    expect(document.querySelector("input.field-error, select.field-error")).toBeTruthy();
   });
 });
