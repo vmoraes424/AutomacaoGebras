@@ -36,6 +36,19 @@ def test_servico_item_ativo_somente_por_valor():
     assert servico_item_ativo({**tmpl, "ativo": False, "valor": "800"}) is True
 
 
+def test_normalize_preserva_observacoes_legado_sem_matriz_uc():
+    payload = {
+        "cliente": {"codigo_cliente_instalacao": "352/665,1942"},
+        "hub": {
+            "observacoes_detalhes": (
+                "UC = 00665 - SOLE WEB + Gestão ACL - Mercado Livre de Energia = 1.500,92"
+            ),
+        },
+    }
+    out = normalize_hub_payload(payload)
+    assert "1.500,92" in out["hub"]["observacoes_detalhes"]
+
+
 def test_build_observacoes_soma_valores_por_uc():
     instalacoes = [
         _inst(665, "00665", {"sole_web": "1000", "gestao_acl": "500.50"}),

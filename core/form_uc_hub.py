@@ -194,7 +194,9 @@ def normalize_hub_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     total = soma_valores_hub(hub["instalacoes"])
     hub["valor_total"] = _valor_decimal_str(total) or str(hub.get("valor_total") or "")
-    hub["observacoes_detalhes"] = build_observacoes_detalhes_hub(hub["instalacoes"])
+    prior_obs = str(hub.get("observacoes_detalhes") or "").strip()
+    built_obs = build_observacoes_detalhes_hub(hub["instalacoes"])
+    hub["observacoes_detalhes"] = built_obs or prior_obs
     data["hub"] = hub
 
     cliente = dict(data.get("cliente") or {})
