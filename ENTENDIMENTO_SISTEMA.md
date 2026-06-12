@@ -6,6 +6,11 @@ Este repositório contém uma **automação em Python** que liga o **Pipedrive**
 
 Há também um script auxiliar para **registrar um webhook** na API do Clicksign (por exemplo, para receber eventos de assinatura ou de fechamento do envelope em um endpoint HTTP).
 
+
+## Como executar o backend
+
+python -m uvicorn portal.main:app --reload --host 0.0.0.0 --port 8000
+
 ## Sobre o que é (domínio de negócio)
 
 O foco é o **fluxo comercial pós-venda**: formalizar contratos da **Gebras** com clientes (ex.: produtos/serviços relacionados a indicadores, energia e gestão, conforme campos preenchidos no Pipedrive). O texto legal e variáveis do contrato vivem no modelo Word (`contrato_padrao.docx`); os valores (cliente, valores, datas, contatos, quantidades etc.) vêm dos **campos customizados** e metadados do deal no Pipedrive.
