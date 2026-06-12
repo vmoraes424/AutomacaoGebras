@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetApiClientCachesForTests } from "../api/client";
+import { PipeFieldOptionsProvider } from "../hooks/usePipeFieldOptions";
 import { DealFormPage } from "../pages/DealFormPage";
 import { emptyFormPayloadV1 } from "../schemas/formV1";
 import { mockFormRecord } from "../test/mocks";
@@ -15,13 +16,15 @@ function fetchUrl(input: RequestInfo | URL): string {
 
 function renderForm() {
   return render(
-    <MemoryRouter
-      initialEntries={[{ pathname: "/deals/1/746/form", state: { ownerName: "Alice", dealTitle: "Biview" } }]}
-    >
-      <Routes>
-        <Route path="/deals/:ownerId/:dealId/form" element={<DealFormPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <PipeFieldOptionsProvider>
+      <MemoryRouter
+        initialEntries={[{ pathname: "/deals/1/746/form", state: { ownerName: "Alice", dealTitle: "Biview" } }]}
+      >
+        <Routes>
+          <Route path="/deals/:ownerId/:dealId/form" element={<DealFormPage />} />
+        </Routes>
+      </MemoryRouter>
+    </PipeFieldOptionsProvider>,
   );
 }
 

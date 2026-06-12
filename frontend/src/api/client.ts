@@ -38,6 +38,8 @@ async function configRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
+const PIPE_FIELD_OPTIONS_TTL_MS = 30 * 60 * 1000;
+
 const inflightGetForm = new Map<string, Promise<FormRecord>>();
 
 async function request<T>(path: string, init?: RequestInit & { fresh?: boolean }): Promise<T> {
@@ -88,8 +90,10 @@ export const api = {
     ),
 
   getDealFieldOptions: () =>
-    fetchWithApiCache(cacheKey("/pipedrive/deal-field-options"), () =>
-      request<PipedriveDealFieldOptions>("/pipedrive/deal-field-options"),
+    fetchWithApiCache(
+      cacheKey("/pipedrive/deal-field-options"),
+      () => request<PipedriveDealFieldOptions>("/pipedrive/deal-field-options"),
+      { maxAgeMs: PIPE_FIELD_OPTIONS_TTL_MS },
     ),
 
   getHubServicos: () =>

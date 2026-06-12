@@ -1,10 +1,11 @@
 /** Cache client-side simples: TTL + dedupe de requisições em andamento. */
 
-const PLACEHOLDER_MAX_AGE_MS = 15_000;
+const DEFAULT_MAX_AGE_MS = 15_000;
 
 type CacheEntry = {
   data: unknown;
   fetchedAt: number;
+  maxAgeMs: number;
 };
 
 const store = new Map<string, CacheEntry>();
@@ -12,7 +13,7 @@ const inflight = new Map<string, Promise<unknown>>();
 
 function isEntryValid(entry: CacheEntry | undefined): entry is CacheEntry {
   if (!entry) return false;
-  return Date.now() - entry.fetchedAt <= PLACEHOLDER_MAX_AGE_MS;
+  return Date.now() - entry.fetchedAt <= entry.maxAgeMs;
 }
 
 export function hasApiCache(key: string): boolean {
@@ -41,7 +42,9 @@ export function invalidateApiCache(prefix?: string) {
 export async function fetchWithApiCache<T>(
   key: string,
   fetcher: () => Promise<T>,
+  opts?: { maxAgeMs?: number },
 ): Promise<T> {
+  const maxAgeMs = opts?.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
   const cached = peekApiCache<T>(key);
   if (cached !== null) return cached;
 
@@ -50,7 +53,7 @@ export async function fetchWithApiCache<T>(
 
   const promise = fetcher()
     .then((data) => {
-      store.set(key, { data, fetchedAt: Date.now() });
+      store.set(key, { data, fetchedAt: Date.now(), maxAgeMs });
       inflight.delete(key);
       return data;
     })
