@@ -30,7 +30,10 @@ def list_users(
 def list_deal_field_options(
     c: PortalContainer = Depends(container),
 ) -> dict:
-    return c.list_deal_field_options.execute()
+    try:
+        return c.list_deal_field_options.execute()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/deals", response_model=list[PipedriveDealSummary])

@@ -32,6 +32,21 @@ export const PIPE_FIELD_PATHS = new Set([
   "hub.observacoes_detalhes",
 ]);
 
+/** Campos enum/set do Pipe — sempre renderizados como select no formulário. */
+export const PIPE_SELECT_FIELD_PATHS = new Set([
+  "comercial.filial",
+  "comercial.regional",
+  "comercial.consultor",
+  "comercial.percentual_exito",
+  "signatarios.email_consultor_gebras",
+  "signatarios.email_coordenador_gebras",
+  "signatarios.email_diretor_gebras",
+]);
+
 export function isPipeField(fieldPath: string): boolean {
   return PIPE_FIELD_PATHS.has(fieldPath);
+}
+
+export function isPipeSelectField(fieldPath: string): boolean {
+  return PIPE_SELECT_FIELD_PATHS.has(fieldPath);
 }

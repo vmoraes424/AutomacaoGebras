@@ -236,41 +236,50 @@ def get_val(deal_data: dict, code: str) -> str:
 _enum_option_labels: dict[str, dict[str, str]] | None = None
 
 
+def _load_enum_option_labels_from_api() -> dict[str, dict[str, str]] | None:
+    """Retorna None se a API falhar (permite nova tentativa)."""
+    if not PIPEDRIVE_API_TOKEN:
+        return None
+    result: dict[str, dict[str, str]] = {}
+    cursor = None
+    while True:
+        params: dict = {"limit": 500}
+        if cursor:
+            params["cursor"] = cursor
+        response = requests.get(
+            "https://api.pipedrive.com/api/v2/dealFields",
+            headers={"x-api-token": PIPEDRIVE_API_TOKEN},
+            params=params,
+            timeout=60,
+        )
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            return None
+        body = response.json()
+        for field in body.get("data") or []:
+            code = str(field.get("field_code") or "")
+            if not code or not field.get("options"):
+                continue
+            result[code] = {
+                str(opt.get("id")): str(opt.get("label") or "").strip()
+                for opt in field.get("options") or []
+                if opt.get("id") is not None
+            }
+        cursor = (body.get("additional_data") or {}).get("next_cursor")
+        if not cursor:
+            break
+    return result
+
+
 def _enum_option_labels_for_field(field_code: str) -> dict[str, str]:
     """Mapeia id da opção (str) -> label (dealFields v2)."""
     global _enum_option_labels
     if _enum_option_labels is None:
-        _enum_option_labels = {}
-        if not PIPEDRIVE_API_TOKEN:
+        loaded = _load_enum_option_labels_from_api()
+        if loaded is None:
             return {}
-        cursor = None
-        while True:
-            params: dict = {"limit": 500}
-            if cursor:
-                params["cursor"] = cursor
-            response = requests.get(
-                "https://api.pipedrive.com/api/v2/dealFields",
-                headers={"x-api-token": PIPEDRIVE_API_TOKEN},
-                params=params,
-                timeout=60,
-            )
-            try:
-                response.raise_for_status()
-            except requests.HTTPError:
-                break
-            body = response.json()
-            for field in body.get("data") or []:
-                code = str(field.get("field_code") or "")
-                if not code or not field.get("options"):
-                    continue
-                _enum_option_labels[code] = {
-                    str(opt.get("id")): str(opt.get("label") or "").strip()
-                    for opt in field.get("options") or []
-                    if opt.get("id") is not None
-                }
-            cursor = (body.get("additional_data") or {}).get("next_cursor")
-            if not cursor:
-                break
+        _enum_option_labels = loaded
     return _enum_option_labels.get(field_code, {})
 
 

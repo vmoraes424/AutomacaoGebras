@@ -14,7 +14,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Gebras Portal API",
         description="API do formulário web — DDD pragmático (formulario + crm)",
-        version="0.3.0",
+        version="0.3.1",
     )
     app.add_middleware(PortalAuthMiddleware)
     app.add_middleware(RequestLoggingMiddleware)

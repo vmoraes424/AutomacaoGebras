@@ -28,6 +28,7 @@ import {
   handleFieldPulseAnimationEnd,
   type FieldSyncUiProps,
 } from "./formFieldSyncUi";
+import { isPipeSelectField } from "../constants/pipeFields";
 
 export type PipeFieldSync = { path: string; value: string | number };
 
@@ -297,12 +298,14 @@ function PipeSelectField({
   disabled,
   fieldErrors,
   fieldSyncPulse,
+  loadError,
 }: {
   label: string;
   fieldKey: string;
   value: string;
   options: { id: number; label: string }[];
   loading?: boolean;
+  loadError?: string;
   onChange: (v: string) => void;
   onFieldBlur?: (fieldPath: string, value: string) => void;
   onFieldPulseEnd?: (fieldPath: string) => void;
@@ -350,6 +353,12 @@ function PipeSelectField({
       {err && (
         <span id={`${fieldKey}-error`} className="field-error-msg" role="alert">
           {err}
+        </span>
+      )}
+      {!loading && !err && options.length === 0 && loadError && (
+        <span className="field-error-msg" role="alert">
+          Opções do Pipedrive indisponíveis. Verifique se o backend está rodando e se PIPEDRIVE_API_TOKEN
+          está no .env.
         </span>
       )}
     </label>
@@ -913,7 +922,7 @@ export function ComercialSection({ payload, onChange, disabled, fieldErrors, onF
   const set = (key: keyof typeof c, value: string) =>
     onChange({ ...payload, comercial: { ...c, [key]: value } });
   const syncProps = { fieldSyncPulse, onFieldPulseEnd };
-  const { options: pipeOptions, loading: optionsLoading } = usePipeFieldOptions();
+  const { options: pipeOptions, loading: optionsLoading, error: optionsError } = usePipeFieldOptions();
 
   const selectFields: {
     key: keyof typeof c;
@@ -940,6 +949,7 @@ export function ComercialSection({ payload, onChange, disabled, fieldErrors, onF
             value={c[key]}
             options={pipeOptions[fieldKey] ?? []}
             loading={optionsLoading}
+            loadError={optionsError}
             disabled={disabled}
             onChange={(v) => set(key, v)}
             {...syncProps}
@@ -954,7 +964,7 @@ export function SignatariosSection({ payload, onChange, disabled, fieldErrors, o
   const s = payload.signatarios;
   const set = (key: keyof typeof s, value: string) =>
     onChange({ ...payload, signatarios: { ...s, [key]: value } });
-  const { options: pipeOptions, loading: optionsLoading } = usePipeFieldOptions();
+  const { options: pipeOptions, loading: optionsLoading, error: optionsError } = usePipeFieldOptions();
   const fields: { key: keyof typeof s; label: string; fieldKey: string }[] = [
     { key: "email_assinante_contrato", label: "E-mail assinante contrato", fieldKey: "signatarios.email_assinante_contrato" },
     { key: "email_consultor_gebras", label: "E-mail consultor Gebras", fieldKey: "signatarios.email_consultor_gebras" },
@@ -968,8 +978,7 @@ export function SignatariosSection({ payload, onChange, disabled, fieldErrors, o
       <h2 id="sec-signatarios">Signatários</h2>
       <div className="field-grid">
         {fields.map(({ key, label, fieldKey }) => {
-          const selectOptions = pipeOptions[fieldKey] ?? [];
-          if (selectOptions.length > 0) {
+          if (isPipeSelectField(fieldKey)) {
             return (
               <PipeSelectField
                 key={key}
@@ -980,8 +989,9 @@ export function SignatariosSection({ payload, onChange, disabled, fieldErrors, o
                 onFieldPulseEnd={onFieldPulseEnd}
                 label={label}
                 value={s[key]}
-                options={selectOptions}
+                options={pipeOptions[fieldKey] ?? []}
                 loading={optionsLoading}
+                loadError={optionsError}
                 disabled={disabled}
                 onChange={(v) => set(key, v)}
               />

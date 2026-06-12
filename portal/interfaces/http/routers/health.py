@@ -13,7 +13,10 @@ def health() -> dict:
     return {
         "status": "ok",
         "service": "portal",
-        "version": "0.3.0",
+        "version": "0.3.1",
         "auth_required": bool(portal_api_token()),
         "formulario_web_enabled": get_automacao_config().formulario_web_enabled,
+        "capabilities": {
+            "deal_field_options": True,
+        },
     }

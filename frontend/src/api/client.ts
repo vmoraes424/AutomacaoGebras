@@ -92,7 +92,23 @@ export const api = {
   getDealFieldOptions: () =>
     fetchWithApiCache(
       cacheKey("/pipedrive/deal-field-options"),
-      () => request<PipedriveDealFieldOptions>("/pipedrive/deal-field-options"),
+      async () => {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        const response = await fetch(`${API_BASE}/pipedrive/deal-field-options`, { headers });
+        if (response.status === 404) {
+          throw new Error(
+            "Backend desatualizado: a rota GET /pipedrive/deal-field-options não existe. " +
+              "No PC do servidor rode git pull, reinicie uvicorn portal.main:app e teste " +
+              "http://localhost:8000/pipedrive/deal-field-options",
+          );
+        }
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          const detail = (body as { detail?: string }).detail ?? response.statusText;
+          throw new Error(detail || `HTTP ${response.status}`);
+        }
+        return response.json() as Promise<PipedriveDealFieldOptions>;
+      },
       { maxAgeMs: PIPE_FIELD_OPTIONS_TTL_MS },
     ),
 

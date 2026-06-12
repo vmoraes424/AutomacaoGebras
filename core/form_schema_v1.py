@@ -268,4 +268,9 @@ def list_form_enum_field_options() -> dict[str, list[dict[str, int | str]]]:
         ]
         opcoes.sort(key=lambda item: str(item["label"]).casefold())
         out[path] = opcoes
+    if not any(out.values()):
+        from .config import PIPEDRIVE_API_TOKEN
+
+        if not (PIPEDRIVE_API_TOKEN or "").strip():
+            raise RuntimeError("PIPEDRIVE_API_TOKEN não configurado no .env")
     return out

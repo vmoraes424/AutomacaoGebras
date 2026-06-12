@@ -30,11 +30,14 @@ cd frontend && npm run dev
 
 ```bash
 curl -s http://localhost:8000/health | jq .
+curl -s http://localhost:8000/pipedrive/deal-field-options | jq '.fields | keys'
 curl -s "http://localhost:8000/pipedrive/users" | jq 'length'
 curl -s "http://localhost:8000/pipedrive/deals?owner_user_id=24587114" | jq 'map(.id)'
 ```
 
-Esperado: health `200`; users > 0; lista contém deal `746` se ainda em Contrato.
+Esperado: health `200` com `"capabilities": {"deal_field_options": true}`; deal-field-options lista 7 chaves (comercial.* + signatários Gebras); users > 0; lista contém deal `746` se ainda em Contrato.
+
+Se `deal-field-options` retornar **404**, o backend está **desatualizado** ou o `uvicorn` não foi reiniciado após `git pull`.
 
 ## 2. Testes automatizados com rede
 
